@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import logging
-from datetime import date
+from datetime import date, datetime, time, timedelta
 from typing import Any
 
 import aiohttp
@@ -87,30 +87,31 @@ class OctopusAnalyticsApiClient:
         return self._account_number
 
     async def get_meter_info(self) -> dict:
-        """Get electricity meter and tariff info.
+        """Get electricity meter and product info.
 
-        Octopus Energy Germany exposes electricity data via the account property
-        and MaLo model, not via the UK-style electricityAgreements field.
+        Avoid account.property here because some Octopus Germany accounts return
+        an internal Kraken error for that field. The market supply agreement path
+        is enough for stable device/product metadata.
         """
         query = """
         query AccountDetails($accountNumber: String!) {
             account(accountNumber: $accountNumber) {
-                property {
-                    electricityMalos {
-                        maloNumber
-                        meters {
-                            number
-                            meloNumber
-                            hasSmartMeterGateway
-                        }
-                        agreements {
+                marketSupplyAgreements(active: true, first: 3) {
+                    edges {
+                        node {
                             isActive
                             product {
                                 code
                             }
-                            unitRateInformation {
-                                ... on SimpleProductUnitRateInformation {
-                                    latestGrossUnitRateCentsPerKwh
+                            supplyPoint {
+                                marketName
+                                externalIdentifier
+                                devices(first: 5) {
+                                    edges {
+                                        node {
+                                            deviceIdentifier
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -121,26 +122,31 @@ class OctopusAnalyticsApiClient:
         """
         data = await self._graphql(query, {"accountNumber": self._account_number})
         account = data.get("account") or {}
-        property_data = account.get("property") or {}
-        malos = property_data.get("electricityMalos", [])
-        if not malos:
-            return {}
-
-        malo = malos[0]
-        meters = malo.get("meters", [])
-        agreements = malo.get("agreements", [])
-        active_agreement = next(
-            (agreement for agreement in agreements if agreement.get("isActive")),
-            agreements[0] if agreements else {},
+        agreements = (account.get("marketSupplyAgreements") or {}).get("edges", [])
+        electricity_agreement = next(
+            (
+                edge.get("node") or {}
+                for edge in agreements
+                if (edge.get("node") or {})
+                .get("supplyPoint", {})
+                .get("marketName")
+                == "DEU_ELECTRICITY"
+            ),
+            (agreements[0].get("node") or {}) if agreements else {},
         )
-        unit_rate_info = active_agreement.get("unitRateInformation") or {}
-        product = active_agreement.get("product") or {}
+        supply_point = electricity_agreement.get("supplyPoint") or {}
+        devices = (supply_point.get("devices") or {}).get("edges", [])
+        product = electricity_agreement.get("product") or {}
 
         return {
-            "serial_number": meters[0].get("number") if meters else None,
-            "melo_number": meters[0].get("meloNumber") if meters else None,
-            "mpan": malo.get("maloNumber"),
-            "unit_rate": unit_rate_info.get("latestGrossUnitRateCentsPerKwh"),
+            "serial_number": (
+                (devices[0].get("node") or {}).get("deviceIdentifier")
+                if devices
+                else None
+            ),
+            "melo_number": None,
+            "mpan": supply_point.get("externalIdentifier"),
+            "unit_rate": None,
             "standing_charge": None,
             "product_code": product.get("code"),
         }
@@ -152,78 +158,86 @@ class OctopusAnalyticsApiClient:
         frequency: str = "THIRTY_MIN_INTERVAL",
     ) -> list[dict]:
         """Get electricity consumption data between two dates."""
-        query = """
+        granularity = {
+            "DAY_INTERVAL": "DAY",
+            "THIRTY_MIN_INTERVAL": "THIRTY_MIN",
+            "HOUR_INTERVAL": "HOUR",
+        }.get(frequency, "THIRTY_MIN")
+        first = 1000 if granularity == "DAY" else 3000
+        start_at = datetime.combine(start, time.min).isoformat()
+        end_at = datetime.combine(end + timedelta(days=1), time.min).isoformat()
+
+        query = f"""
         query ConsumptionData(
             $accountNumber: String!
-            $startDate: Date!
-            $endDate: Date!
-            $frequency: ReadingFrequencyType!
-        ) {
-            account(accountNumber: $accountNumber) {
-                property {
-                    measurements(
-                        startOn: $startDate
-                        endOn: $endDate
-                        timezone: "Europe/Berlin"
-                        utilityFilters: {
-                            electricityFilters: {
-                                readingFrequencyType: $frequency
-                                readingDirection: CONSUMPTION
-                                readingQuality: COMBINED
-                            }
-                        }
-                        first: 10000
-                    ) {
-                        edges {
-                            node {
-                                value
-                                unit
-                                readAt
-                                ... on IntervalMeasurementType {
-                                    startAt
-                                    endAt
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
+            $startAt: DateTime!
+            $endAt: DateTime!
+            $granularity: TimeGranularities!
+        ) {{
+            account(accountNumber: $accountNumber) {{
+                marketSupplyAgreements(active: true, first: 3) {{
+                    edges {{
+                        node {{
+                            supplyPoint {{
+                                marketName
+                                readings(
+                                    startAt: $startAt
+                                    endAt: $endAt
+                                    readingType: INTERVAL
+                                    timeGranularity: $granularity
+                                    timezone: "Europe/Berlin"
+                                    units: [KILOWATT_HOURS]
+                                ) {{
+                                    importReadings(first: {first}) {{
+                                        edges {{
+                                            node {{
+                                                value
+                                                units
+                                                intervalStart
+                                                intervalEnd
+                                            }}
+                                        }}
+                                    }}
+                                }}
+                            }}
+                        }}
+                    }}
+                }}
+            }}
+        }}
         """
         data = await self._graphql(
             query,
             {
                 "accountNumber": self._account_number,
-                "startDate": start.isoformat(),
-                "endDate": end.isoformat(),
-                "frequency": frequency,
+                "startAt": start_at,
+                "endAt": end_at,
+                "granularity": granularity,
             },
         )
         account = data.get("account") or {}
-        property_data = account.get("property") or {}
-        measurements = property_data.get("measurements") or {}
-        edges = measurements.get("edges", [])
+        agreement_edges = (account.get("marketSupplyAgreements") or {}).get("edges", [])
         results = []
-        for edge in edges:
-            node = edge.get("node") or {}
-            start_at = node.get("startAt") or node.get("readAt")
-            if not start_at:
+        for agreement_edge in agreement_edges:
+            node = agreement_edge.get("node") or {}
+            supply_point = node.get("supplyPoint") or {}
+            if supply_point.get("marketName") != "DEU_ELECTRICITY":
                 continue
-
-            value = node.get("value")
-            unit = node.get("unit")
-            if value is not None and unit in ("WATT_HOURS", "Wh"):
-                value = float(value) / 1000
-                unit = "KILOWATT_HOURS"
-
-            results.append(
-                {
-                    "startDt": start_at,
-                    "endDt": node.get("endAt") or start_at,
-                    "value": value,
-                    "unit": unit,
-                }
-            )
+            readings = supply_point.get("readings") or {}
+            import_readings = readings.get("importReadings") or {}
+            for reading_edge in import_readings.get("edges", []):
+                reading = reading_edge.get("node") or {}
+                start_dt = reading.get("intervalStart")
+                if not start_dt:
+                    continue
+                results.append(
+                    {
+                        "startDt": start_dt,
+                        "endDt": reading.get("intervalEnd") or start_dt,
+                        "value": reading.get("value"),
+                        "unit": reading.get("units"),
+                    }
+                )
         return results
 
     async def get_account_balance(self) -> float:
