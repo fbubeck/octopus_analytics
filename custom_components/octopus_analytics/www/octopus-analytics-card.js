@@ -18,6 +18,7 @@ class OctopusAnalyticsCard extends HTMLElement {
       show_kpis: true,
       monthly_budget_eur: null,
       monthly_payment_eur: null,
+      monthly_base_fee_eur: null,
       daily_target_kwh: null,
       anomaly_threshold_percent: 30,
       ...config,
@@ -249,7 +250,11 @@ class OctopusAnalyticsCard extends HTMLElement {
     const projectedKwh = avgKwh * daysInMonth;
     const projectedCost = avgCost * daysInMonth;
     const unitRate = parseFloat(this._getState("sensor.octopus_analytics_strompreis"));
-    const standingCharge = parseFloat(this._getState("sensor.octopus_analytics_grundpreis_pro_tag"));
+    const baseFeeMonthly = parseFloat(this._config.monthly_base_fee_eur);
+    const standingChargeSensor = parseFloat(this._getState("sensor.octopus_analytics_grundpreis_pro_tag"));
+    const standingCharge = !isNaN(baseFeeMonthly)
+      ? baseFeeMonthly / daysInMonth
+      : standingChargeSensor;
     const projectedEnergyCost = !isNaN(unitRate) ? projectedKwh * unitRate : null;
     const projectedStandingCost = !isNaN(standingCharge) ? standingCharge * daysInMonth : null;
     const costBreakdown = projectedEnergyCost !== null && projectedStandingCost !== null

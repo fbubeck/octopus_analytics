@@ -74,6 +74,7 @@ show_kpis: true
 show_hourly: true
 show_monthly: true
 monthly_payment_eur: 59.20   # optional: monatlicher Abschlag
+monthly_base_fee_eur: 13.89  # optional: Grundpreis pro Monat
 daily_target_kwh: 5          # optional: Tagesziel für Ampel
 anomaly_threshold_percent: 30 # optional: Schwelle für Anomalien
 ```
