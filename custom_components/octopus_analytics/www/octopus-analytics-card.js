@@ -263,27 +263,35 @@ class OctopusAnalyticsCard extends HTMLElement {
     const paymentSource = this._config.monthly_payment_eur ?? this._config.monthly_budget_eur;
     const payment = parseFloat(paymentSource);
     const paymentDelta = !isNaN(payment) ? payment - projectedCost : null;
+    const paymentState = paymentDelta === null ? "neutral" : paymentDelta >= 0 ? "good" : "bad";
     const paymentDeltaText = paymentDelta === null
       ? "—"
       : paymentDelta >= 0
-        ? `Puffer +${this._formatEur(paymentDelta)}`
-        : `Nachzahlung −${this._formatEur(Math.abs(paymentDelta))}`;
+        ? `+${this._formatEur(paymentDelta)}`
+        : `−${this._formatEur(Math.abs(paymentDelta))}`;
+    const paymentDeltaLabel = paymentDelta === null
+      ? "kein Abschlag"
+      : paymentDelta >= 0
+        ? "Puffer"
+        : "Nachzahlung";
 
     return `
       <div class="section-heading">Abschlagsplanung</div>
-      <div class="forecast-grid">
-        <div class="forecast-card accent-blue">
-          <div class="kpi-label">PROGNOSE</div>
-          <div class="kpi-value">${this._formatEur(projectedCost)}</div>
-          <div class="kpi-sub">${costBreakdown} · ${this._formatKwh(projectedKwh)}</div>
+      <div class="payment-panel ${paymentState}">
+        <div class="money-chip neutral">
+          <span>Prognose</span>
+          <b>${this._formatEur(projectedCost)}</b>
         </div>
-        <div class="forecast-card ${paymentDelta === null ? "" : paymentDelta >= 0 ? "accent-teal" : "accent-red"}">
-          <div class="kpi-label">ABSCHLAG PLAN</div>
-          <div class="kpi-value">${paymentDelta === null ? "nicht gesetzt" : this._formatEur(payment)}</div>
-          <div class="kpi-sub">${paymentDeltaText}</div>
+        <div class="money-chip neutral">
+          <span>Abschlag</span>
+          <b>${paymentDelta === null ? "—" : this._formatEur(payment)}</b>
+        </div>
+        <div class="money-chip ${paymentState}">
+          <span>${paymentDeltaLabel}</span>
+          <b>${paymentDeltaText}</b>
         </div>
       </div>
-      <div class="mini-note">Grün = Abschlag reicht · Rot = Nachzahlung · AP Arbeitspreis · GP Grundpreis</div>`;
+      <div class="mini-note">Grün = Abschlag reicht · Rot = Nachzahlung</div>`;
   }
 
   _renderTrafficAndAnomalies(last30) {
@@ -710,6 +718,42 @@ class OctopusAnalyticsCard extends HTMLElement {
         border: 1px solid rgba(255,255,255,0.08);
       }
       .accent-red { border-color: rgba(255,100,80,0.35); }
+      .payment-panel {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 8px;
+        background: rgba(255,255,255,0.035);
+        border: 1px solid rgba(255,255,255,0.08);
+        border-radius: 14px;
+        padding: 8px;
+        margin-bottom: 8px;
+      }
+      .payment-panel.good { border-color: rgba(80,220,120,0.25); }
+      .payment-panel.bad { border-color: rgba(255,100,80,0.28); }
+      .money-chip {
+        border-radius: 12px;
+        padding: 9px 8px;
+        background: rgba(255,255,255,0.06);
+        border: 1px solid rgba(255,255,255,0.08);
+        text-align: center;
+      }
+      .money-chip span {
+        display: block;
+        font-size: 9px;
+        font-weight: 800;
+        letter-spacing: 0.5px;
+        color: rgba(255,255,255,0.45);
+        text-transform: uppercase;
+        margin-bottom: 4px;
+      }
+      .money-chip b {
+        font-size: 14px;
+        color: rgba(255,255,255,0.94);
+      }
+      .money-chip.good { background: rgba(80,220,120,0.14); border-color: rgba(80,220,120,0.35); }
+      .money-chip.good b { color: rgba(110,245,145,0.98); }
+      .money-chip.bad { background: rgba(255,100,80,0.14); border-color: rgba(255,100,80,0.35); }
+      .money-chip.bad b { color: rgba(255,135,115,0.98); }
       .mini-note {
         font-size: 10px;
         color: rgba(255,255,255,0.42);
