@@ -45,6 +45,23 @@ class OctopusAnalyticsCard extends HTMLElement {
     return n.toFixed(2) + " €";
   }
 
+
+  _tooltip(text) {
+    return String(text || "").replace(/"/g, "&quot;");
+  }
+
+  _formatDateDE(dateStr) {
+    if (!dateStr || dateStr.length < 10) return dateStr || "";
+    const [y, m, d] = dateStr.substring(0, 10).split("-");
+    return `${d}.${m}.${y}`;
+  }
+
+  _monthLabel(monthKey) {
+    const names = ["Jan", "Feb", "Mär", "Apr", "Mai", "Jun", "Jul", "Aug", "Sep", "Okt", "Nov", "Dez"];
+    const m = parseInt(String(monthKey).substring(5, 7), 10);
+    return names[m - 1] || monthKey;
+  }
+
   _renderHourlyChart(hourlyData) {
     if (!hourlyData || !hourlyData.length) {
       return `<div class="no-data">Keine Stundendaten verfügbar</div>`;
@@ -73,7 +90,7 @@ class OctopusAnalyticsCard extends HTMLElement {
         const r = Math.round(80 + intensity * 120);
         const g = Math.round(180 - intensity * 80);
         const hour = h.start ? h.start.substring(11, 13) : String(i).padStart(2, "0");
-        return `<div class="bar-wrap" title="${hour}:00 · ${val.toFixed(3)} kWh">
+        return `<div class="bar-wrap has-tooltip" data-tooltip="${this._tooltip(`${hour}:00 Uhr · ${val.toFixed(3)} kWh`)}" title="${hour}:00 · ${val.toFixed(3)} kWh">
           <div class="bar" style="height:${pct}%;background:rgba(${r},${g},255,0.85)"></div>
         </div>`;
       })
@@ -97,13 +114,13 @@ class OctopusAnalyticsCard extends HTMLElement {
         <div class="chart-area">
           <div class="bars">${bars}</div>
           <div class="x-labels">
-            <span>0h</span><span>6h</span><span>12h</span><span>18h</span><span>24h</span>
+            <span>0</span><span>3</span><span>6</span><span>9</span><span>12</span><span>15</span><span>18</span><span>21</span><span>24h</span>
           </div>
         </div>
       </div>`;
   }
 
-  _renderMonthlyChart(last30) {
+  _renderDailyChart(last30) {
     if (!last30 || !last30.length) {
       return `<div class="no-data">Keine Tagesdaten verfügbar</div>`;
     }
@@ -119,7 +136,8 @@ class OctopusAnalyticsCard extends HTMLElement {
         const r = Math.round(80 + intensity * 120);
         const g = Math.round(180 - intensity * 80);
         const day = d.date ? d.date.substring(8, 10) : "";
-        return `<div class="bar-wrap" title="${d.date} · ${val.toFixed(3)} kWh">
+        const label = d.date ? this._formatDateDE(d.date) : "";
+        return `<div class="bar-wrap has-tooltip" data-tooltip="${this._tooltip(`${label} · ${val.toFixed(3)} kWh`)}" title="${d.date} · ${val.toFixed(3)} kWh">
           <div class="bar" style="height:${pct}%;background:rgba(${r},${g},255,0.85)"></div>
         </div>`;
       })
@@ -128,10 +146,60 @@ class OctopusAnalyticsCard extends HTMLElement {
     return `
       <div class="chart-header">
         <span class="chart-title">Tagesverbrauch – letzte 30 Tage</span>
+        <span class="chart-total">max ${maxVal.toFixed(2)} kWh</span>
       </div>
       <div class="chart-body">
         <div class="chart-area" style="margin-left:0">
           <div class="bars">${bars}</div>
+          <div class="x-labels dense-labels">
+            ${last30.map((d, i) => i % 5 === 0 || i === last30.length - 1 ? `<span>${d.date?.substring(8, 10) || ""}</span>` : `<span></span>`).join("")}
+          </div>
+        </div>
+      </div>`;
+  }
+
+  _renderYearChart(monthly) {
+    if (!monthly || !Object.keys(monthly).length) {
+      return `<div class="no-data">Keine Monatsdaten verfügbar</div>`;
+    }
+
+    const now = new Date();
+    const months = [];
+    for (let i = 11; i >= 0; i--) {
+      const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+      months.push({ key, label: this._monthLabel(key), data: monthly[key] || null });
+    }
+
+    const values = months.map((m) => m.data?.total_kwh || 0);
+    const maxVal = Math.max(...values, 0.001);
+    const total = values.reduce((a, b) => a + b, 0);
+
+    const bars = months.map((m) => {
+      const val = m.data?.total_kwh || 0;
+      const pct = val > 0 ? Math.max(3, (val / maxVal) * 100) : 0;
+      const intensity = val / maxVal;
+      const r = Math.round(100 + intensity * 100);
+      const g = Math.round(130 + intensity * 90);
+      const tooltip = m.data
+        ? `${m.label} ${m.key.substring(0, 4)} · ${val.toFixed(3)} kWh · Ø ${(m.data.avg_day_kwh || 0).toFixed(2)} kWh/Tag · ${m.data.days || 0} Tage`
+        : `${m.label} ${m.key.substring(0, 4)} · keine Daten`;
+      return `<div class="month-bar-wrap has-tooltip" data-tooltip="${this._tooltip(tooltip)}" title="${this._tooltip(tooltip)}">
+        <div class="bar month-bar ${val === 0 ? "empty" : ""}" style="height:${pct}%;background:rgba(${r},${g},255,0.85)"></div>
+      </div>`;
+    }).join("");
+
+    return `
+      <div class="chart-header">
+        <span class="chart-title">Monatsverbrauch – letzte 12 Monate</span>
+        <span class="chart-total">∑ ${total.toFixed(1)} kWh</span>
+      </div>
+      <div class="chart-body">
+        <div class="chart-area" style="margin-left:0">
+          <div class="bars month-bars">${bars}</div>
+          <div class="x-labels month-labels">
+            ${months.map((m) => `<span>${m.label}</span>`).join("")}
+          </div>
         </div>
       </div>`;
   }
@@ -354,20 +422,63 @@ class OctopusAnalyticsCard extends HTMLElement {
         display: flex;
         align-items: flex-end;
         cursor: default;
+        position: relative;
+      }
+      .month-bar-wrap {
+        flex: 1;
+        height: 100%;
+        display: flex;
+        align-items: flex-end;
+        position: relative;
       }
       .bar {
         width: 100%;
-        border-radius: 2px 2px 0 0;
+        border-radius: 3px 3px 0 0;
         min-height: 2px;
-        transition: opacity 0.15s;
+        transition: opacity 0.15s, transform 0.15s, filter 0.15s;
       }
-      .bar-wrap:hover .bar { opacity: 0.75; }
+      .month-bar.empty { min-height: 0; background: rgba(255,255,255,0.08) !important; border-top: 1px dashed rgba(255,255,255,0.15); }
+      .bar-wrap:hover .bar, .month-bar-wrap:hover .bar { opacity: 0.9; transform: scaleY(1.03); filter: brightness(1.18); }
+      .has-tooltip::after {
+        content: attr(data-tooltip);
+        position: absolute;
+        left: 50%;
+        bottom: calc(100% + 8px);
+        transform: translateX(-50%);
+        background: rgba(10,16,24,0.96);
+        color: rgba(255,255,255,0.95);
+        border: 1px solid rgba(80,200,255,0.35);
+        border-radius: 8px;
+        padding: 6px 8px;
+        font-size: 11px;
+        line-height: 1.25;
+        white-space: nowrap;
+        pointer-events: none;
+        opacity: 0;
+        z-index: 10;
+        box-shadow: 0 8px 24px rgba(0,0,0,0.35);
+      }
+      .has-tooltip:hover::after { opacity: 1; }
       .x-labels {
         display: flex;
         justify-content: space-between;
         margin-top: 4px;
         font-size: 8px;
-        color: rgba(255,255,255,0.3);
+        color: rgba(255,255,255,0.35);
+      }
+      .dense-labels {
+        display: grid;
+        grid-template-columns: repeat(30, 1fr);
+        gap: 2px;
+        text-align: center;
+      }
+      .month-bars { gap: 5px; height: 95px; }
+      .month-labels {
+        display: grid;
+        grid-template-columns: repeat(12, 1fr);
+        gap: 2px;
+        text-align: center;
+        font-size: 9px;
       }
       .divider {
         height: 1px;
@@ -387,6 +498,7 @@ class OctopusAnalyticsCard extends HTMLElement {
 
     const hourlyData = this._getAttr("sensor.octopus_analytics_verbrauch_gestern", "hourly") || [];
     const last30 = this._getAttr("sensor.octopus_analytics_letzte_30_tage_json", "data") || [];
+    const monthly = this._getAttr("sensor.octopus_analytics_monatszusammenfassung_json", "data") || {};
 
     this.shadowRoot.innerHTML = `
       <style>${this._styles()}</style>
@@ -395,7 +507,9 @@ class OctopusAnalyticsCard extends HTMLElement {
         ${this._config.show_kpis ? this._renderKPIs() : ""}
         ${this._config.show_hourly ? `<div class="chart-section">${this._renderHourlyChart(hourlyData)}</div>` : ""}
         ${this._config.show_hourly && this._config.show_monthly ? '<div class="divider"></div>' : ""}
-        ${this._config.show_monthly ? `<div class="chart-section">${this._renderMonthlyChart(last30)}</div>` : ""}
+        ${this._config.show_monthly ? `<div class="chart-section">${this._renderDailyChart(last30)}</div>` : ""}
+        ${this._config.show_monthly ? '<div class="divider"></div>' : ""}
+        ${this._config.show_monthly ? `<div class="chart-section">${this._renderYearChart(monthly)}</div>` : ""}
       </ha-card>`;
   }
 
