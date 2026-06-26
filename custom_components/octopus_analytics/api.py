@@ -163,22 +163,22 @@ class OctopusAnalyticsApiClient:
             "THIRTY_MIN_INTERVAL": "THIRTY_MIN",
             "HOUR_INTERVAL": "HOUR",
         }.get(frequency, "THIRTY_MIN")
-        first = 1000 if granularity == "DAY" else 3000
         start_at = datetime.combine(start, time.min).isoformat()
         end_at = datetime.combine(end + timedelta(days=1), time.min).isoformat()
 
-        query = f"""
+        query = """
         query ConsumptionData(
             $accountNumber: String!
             $startAt: DateTime!
             $endAt: DateTime!
             $granularity: TimeGranularities!
-        ) {{
-            account(accountNumber: $accountNumber) {{
-                marketSupplyAgreements(active: true, first: 3) {{
-                    edges {{
-                        node {{
-                            supplyPoint {{
+            $after: String
+        ) {
+            account(accountNumber: $accountNumber) {
+                marketSupplyAgreements(active: true, first: 3) {
+                    edges {
+                        node {
+                            supplyPoint {
                                 marketName
                                 readings(
                                     startAt: $startAt
@@ -187,57 +187,82 @@ class OctopusAnalyticsApiClient:
                                     timeGranularity: $granularity
                                     timezone: "Europe/Berlin"
                                     units: [KILOWATT_HOURS]
-                                ) {{
-                                    importReadings(first: {first}) {{
-                                        edges {{
-                                            node {{
+                                ) {
+                                    importReadings(first: 100, after: $after) {
+                                        pageInfo {
+                                            hasNextPage
+                                            endCursor
+                                        }
+                                        edges {
+                                            node {
                                                 value
                                                 units
                                                 intervalStart
                                                 intervalEnd
-                                            }}
-                                        }}
-                                    }}
-                                }}
-                            }}
-                        }}
-                    }}
-                }}
-            }}
-        }}
-        """
-        data = await self._graphql(
-            query,
-            {
-                "accountNumber": self._account_number,
-                "startAt": start_at,
-                "endAt": end_at,
-                "granularity": granularity,
-            },
-        )
-        account = data.get("account") or {}
-        agreement_edges = (account.get("marketSupplyAgreements") or {}).get("edges", [])
-        results = []
-        for agreement_edge in agreement_edges:
-            node = agreement_edge.get("node") or {}
-            supply_point = node.get("supplyPoint") or {}
-            if supply_point.get("marketName") != "DEU_ELECTRICITY":
-                continue
-            readings = supply_point.get("readings") or {}
-            import_readings = readings.get("importReadings") or {}
-            for reading_edge in import_readings.get("edges", []):
-                reading = reading_edge.get("node") or {}
-                start_dt = reading.get("intervalStart")
-                if not start_dt:
-                    continue
-                results.append(
-                    {
-                        "startDt": start_dt,
-                        "endDt": reading.get("intervalEnd") or start_dt,
-                        "value": reading.get("value"),
-                        "unit": reading.get("units"),
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
                     }
-                )
+                }
+            }
+        }
+        """
+
+        results = []
+        after: str | None = None
+        for _ in range(50):
+            data = await self._graphql(
+                query,
+                {
+                    "accountNumber": self._account_number,
+                    "startAt": start_at,
+                    "endAt": end_at,
+                    "granularity": granularity,
+                    "after": after,
+                },
+            )
+            account = data.get("account") or {}
+            agreement_edges = (account.get("marketSupplyAgreements") or {}).get(
+                "edges", []
+            )
+            next_after = None
+            has_next_page = False
+            found_electricity = False
+
+            for agreement_edge in agreement_edges:
+                node = agreement_edge.get("node") or {}
+                supply_point = node.get("supplyPoint") or {}
+                if supply_point.get("marketName") != "DEU_ELECTRICITY":
+                    continue
+
+                found_electricity = True
+                readings = supply_point.get("readings") or {}
+                import_readings = readings.get("importReadings") or {}
+                page_info = import_readings.get("pageInfo") or {}
+                has_next_page = bool(page_info.get("hasNextPage"))
+                next_after = page_info.get("endCursor")
+
+                for reading_edge in import_readings.get("edges", []):
+                    reading = reading_edge.get("node") or {}
+                    start_dt = reading.get("intervalStart")
+                    if not start_dt:
+                        continue
+                    results.append(
+                        {
+                            "startDt": start_dt,
+                            "endDt": reading.get("intervalEnd") or start_dt,
+                            "value": reading.get("value"),
+                            "unit": reading.get("units"),
+                        }
+                    )
+
+            if not found_electricity or not has_next_page or not next_after:
+                break
+            after = next_after
+
         return results
 
     async def get_account_balance(self) -> float:
