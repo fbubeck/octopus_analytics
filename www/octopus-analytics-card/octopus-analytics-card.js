@@ -263,21 +263,27 @@ class OctopusAnalyticsCard extends HTMLElement {
     const paymentSource = this._config.monthly_payment_eur ?? this._config.monthly_budget_eur;
     const payment = parseFloat(paymentSource);
     const paymentDelta = !isNaN(payment) ? payment - projectedCost : null;
+    const paymentDeltaText = paymentDelta === null
+      ? "—"
+      : paymentDelta >= 0
+        ? `Puffer +${this._formatEur(paymentDelta)}`
+        : `Nachzahlung −${this._formatEur(Math.abs(paymentDelta))}`;
 
     return `
+      <div class="section-heading">Abschlagsplanung</div>
       <div class="forecast-grid">
         <div class="forecast-card accent-blue">
-          <div class="kpi-label">MONATSENDE PROG.</div>
+          <div class="kpi-label">PROGNOSE</div>
           <div class="kpi-value">${this._formatEur(projectedCost)}</div>
           <div class="kpi-sub">${costBreakdown} · ${this._formatKwh(projectedKwh)}</div>
         </div>
         <div class="forecast-card ${paymentDelta === null ? "" : paymentDelta >= 0 ? "accent-teal" : "accent-red"}">
           <div class="kpi-label">ABSCHLAG PLAN</div>
           <div class="kpi-value">${paymentDelta === null ? "nicht gesetzt" : this._formatEur(payment)}</div>
-          <div class="kpi-sub">Prog. ${this._formatEur(projectedCost)} · Δ ${paymentDelta === null ? "—" : (paymentDelta >= 0 ? "+" : "−") + this._formatEur(Math.abs(paymentDelta))}</div>
+          <div class="kpi-sub">${paymentDeltaText}</div>
         </div>
       </div>
-      <div class="mini-note">AP = Arbeitspreis · GP = Grundpreis · Δ = Abschlag minus Prognose</div>`;
+      <div class="mini-note">Grün = Abschlag reicht · Rot = Nachzahlung · AP Arbeitspreis · GP Grundpreis</div>`;
   }
 
   _renderTrafficAndAnomalies(last30) {
@@ -682,6 +688,14 @@ class OctopusAnalyticsCard extends HTMLElement {
         gap: 2px;
         text-align: center;
         font-size: 9px;
+      }
+      .section-heading {
+        font-size: 11px;
+        font-weight: 800;
+        color: rgba(255,255,255,0.62);
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        margin: 2px 2px 8px;
       }
       .forecast-grid {
         display: grid;
