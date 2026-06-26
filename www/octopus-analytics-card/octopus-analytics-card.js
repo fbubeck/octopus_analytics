@@ -164,10 +164,10 @@ class OctopusAnalyticsCard extends HTMLElement {
     }
 
     const now = new Date();
+    const year = now.getFullYear();
     const months = [];
-    for (let i = 11; i >= 0; i--) {
-      const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
-      const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+    for (let month = 1; month <= 12; month++) {
+      const key = `${year}-${String(month).padStart(2, "0")}`;
       months.push({ key, label: this._monthLabel(key), data: monthly[key] || null });
     }
 
@@ -191,7 +191,7 @@ class OctopusAnalyticsCard extends HTMLElement {
 
     return `
       <div class="chart-header">
-        <span class="chart-title">Monatsverbrauch – letzte 12 Monate</span>
+        <span class="chart-title">Monatsverbrauch YTD – ${year}</span>
         <span class="chart-total">∑ ${total.toFixed(1)} kWh</span>
       </div>
       <div class="chart-body">
