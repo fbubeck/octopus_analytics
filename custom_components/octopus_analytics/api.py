@@ -9,7 +9,7 @@ import aiohttp
 
 _LOGGER = logging.getLogger(__name__)
 
-API_URL = "https://api.oeg-kraken.energy/v1/graphql/"
+API_URL = "https://api.octopus.energy/v1/graphql/"
 
 
 class OctopusAnalyticsApiError(Exception):
@@ -97,14 +97,23 @@ class OctopusAnalyticsApiClient:
                             serialNumber
                         }
                         mpan
-                        maloNumber
-                        meloNumber
                     }
                     tariff {
-                        unitRate
-                        productCode
-                        validFrom
-                        validTo
+                        ... on StandardTariff {
+                            unitRate
+                            productCode
+                        }
+                        ... on DayNightTariff {
+                            dayRate
+                            productCode
+                        }
+                        ... on ThreeRateTariff {
+                            dayRate
+                            productCode
+                        }
+                        ... on HalfHourlyTariff {
+                            productCode
+                        }
                     }
                 }
             }
@@ -120,9 +129,9 @@ class OctopusAnalyticsApiClient:
 
         return {
             "serial_number": meters[0].get("serialNumber") if meters else None,
-            "melo_number": meter_point.get("meloNumber"),
-            "mpan": meter_point.get("mpan") or meter_point.get("maloNumber"),
-            "unit_rate": tariff.get("unitRate"),
+            "melo_number": None,
+            "mpan": meter_point.get("mpan"),
+            "unit_rate": tariff.get("unitRate") or tariff.get("dayRate"),
             "standing_charge": None,
             "product_code": tariff.get("productCode"),
         }
@@ -134,16 +143,43 @@ class OctopusAnalyticsApiClient:
         frequency: str = "THIRTY_MIN_INTERVAL",
     ) -> list[dict]:
         """Get electricity consumption data between two dates."""
+        grouping = {
+            "DAY_INTERVAL": "DAY",
+            "THIRTY_MIN_INTERVAL": "HALF_HOUR",
+            "HOUR_INTERVAL": "HOUR",
+        }.get(frequency, "HALF_HOUR")
+        start_at = datetime.combine(start, time.min).isoformat()
+
         query = """
-        query ConsumptionData($accountNumber: String!, $startAt: DateTime!) {
+        query ConsumptionData(
+            $accountNumber: String!
+            $startAt: DateTime!
+            $grouping: ConsumptionGroupings!
+            $after: String
+        ) {
             account(accountNumber: $accountNumber) {
                 electricityAgreements {
                     meterPoint {
-                        halfHourlyReadings(startAt: $startAt, first: 48) {
-                            startAt
-                            endAt
-                            value
-                            unit
+                        meters {
+                            consumption(
+                                startAt: $startAt
+                                grouping: $grouping
+                                timezone: "Europe/Berlin"
+                                first: 100
+                                after: $after
+                            ) {
+                                pageInfo {
+                                    hasNextPage
+                                    endCursor
+                                }
+                                edges {
+                                    node {
+                                        startAt
+                                        endAt
+                                        value
+                                    }
+                                }
+                            }
                         }
                     }
                 }
@@ -152,34 +188,46 @@ class OctopusAnalyticsApiClient:
         """
 
         results = []
-        current = start
-        while current <= end:
-            start_at = datetime.combine(current, time.min).isoformat()
+        after: str | None = None
+        for _ in range(50):
             data = await self._graphql(
                 query,
                 {
                     "accountNumber": self._account_number,
                     "startAt": start_at,
+                    "grouping": grouping,
+                    "after": after,
                 },
             )
+            has_next_page = False
+            next_after = None
             account = data.get("account") or {}
             agreements = account.get("electricityAgreements") or []
             for agreement in agreements:
                 meter_point = agreement.get("meterPoint") or {}
-                readings = meter_point.get("halfHourlyReadings") or []
-                for reading in readings:
-                    start_dt = reading.get("startAt")
-                    if not start_dt:
-                        continue
-                    results.append(
-                        {
-                            "startDt": start_dt,
-                            "endDt": reading.get("endAt") or start_dt,
-                            "value": reading.get("value"),
-                            "unit": reading.get("unit"),
-                        }
-                    )
-            current += timedelta(days=1)
+                for meter in meter_point.get("meters") or []:
+                    consumption = meter.get("consumption") or {}
+                    page_info = consumption.get("pageInfo") or {}
+                    has_next_page = bool(page_info.get("hasNextPage"))
+                    next_after = page_info.get("endCursor")
+
+                    for edge in consumption.get("edges", []):
+                        reading = edge.get("node") or {}
+                        start_dt = reading.get("startAt")
+                        if not start_dt:
+                            continue
+                        results.append(
+                            {
+                                "startDt": start_dt,
+                                "endDt": reading.get("endAt") or start_dt,
+                                "value": reading.get("value"),
+                                "unit": "kWh",
+                            }
+                        )
+
+            if not has_next_page or not next_after:
+                break
+            after = next_after
 
         return results
 
