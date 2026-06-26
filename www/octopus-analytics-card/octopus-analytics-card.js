@@ -230,7 +230,7 @@ class OctopusAnalyticsCard extends HTMLElement {
     const tabs = [
       ["overview", "Übersicht"],
       ["charts", "Charts"],
-      ["forecast", "Prognose"],
+      ["forecast", "Analyse & Prognose"],
       ["heatmap", "Heatmap"],
     ];
     return `<div class="tabs">${tabs.map(([id, label]) =>
@@ -248,9 +248,8 @@ class OctopusAnalyticsCard extends HTMLElement {
     const avgCost = monthDays > 0 ? monthCost / monthDays : 0;
     const projectedKwh = avgKwh * daysInMonth;
     const projectedCost = avgCost * daysInMonth;
-    const budget = parseFloat(this._config.monthly_budget_eur);
-    const payment = parseFloat(this._config.monthly_payment_eur);
-    const budgetDelta = !isNaN(budget) ? budget - projectedCost : null;
+    const paymentSource = this._config.monthly_payment_eur ?? this._config.monthly_budget_eur;
+    const payment = parseFloat(paymentSource);
     const paymentDelta = !isNaN(payment) ? payment - projectedCost : null;
 
     return `
@@ -260,18 +259,13 @@ class OctopusAnalyticsCard extends HTMLElement {
           <div class="kpi-value">${this._formatEur(projectedCost)}</div>
           <div class="kpi-sub">Ist ${this._formatEur(monthCost)} · Prog. ${this._formatKwh(projectedKwh)}</div>
         </div>
-        <div class="forecast-card ${budgetDelta === null ? "" : budgetDelta >= 0 ? "accent-teal" : "accent-red"}">
-          <div class="kpi-label">BUDGET PLAN</div>
-          <div class="kpi-value">${budgetDelta === null ? "nicht gesetzt" : this._formatEur(budget)}</div>
-          <div class="kpi-sub">Prog. ${this._formatEur(projectedCost)} · Δ ${budgetDelta === null ? "—" : (budgetDelta >= 0 ? "+" : "−") + this._formatEur(Math.abs(budgetDelta))}</div>
-        </div>
         <div class="forecast-card ${paymentDelta === null ? "" : paymentDelta >= 0 ? "accent-teal" : "accent-red"}">
           <div class="kpi-label">ABSCHLAG PLAN</div>
           <div class="kpi-value">${paymentDelta === null ? "nicht gesetzt" : this._formatEur(payment)}</div>
           <div class="kpi-sub">Prog. ${this._formatEur(projectedCost)} · Δ ${paymentDelta === null ? "—" : (paymentDelta >= 0 ? "+" : "−") + this._formatEur(Math.abs(paymentDelta))}</div>
         </div>
       </div>
-      <div class="mini-note">Ist = bisher im Monat · Prog. = Hochrechnung bis Monatsende · Δ = Plan minus Prognose</div>`;
+      <div class="mini-note">Ist = bisher im Monat · Prog. = Hochrechnung bis Monatsende · Δ = Abschlag minus Prognose</div>`;
   }
 
   _renderTrafficAndAnomalies(last30) {
@@ -330,7 +324,7 @@ class OctopusAnalyticsCard extends HTMLElement {
   _renderActiveTab(hourlyData, last30, monthly) {
     switch (this._activeTab) {
       case "forecast":
-        return `${this._renderForecast(last30)}`;
+        return `${this._renderForecast(last30)}<div class="divider"></div>${this._renderTrafficAndAnomalies(last30)}`;
       case "heatmap":
         return `${this._renderHeatmap(last30)}`;
       case "charts":
@@ -339,14 +333,14 @@ class OctopusAnalyticsCard extends HTMLElement {
           ${this._config.show_monthly ? `<div class="chart-section">${this._renderDailyChart(last30)}</div><div class="divider"></div><div class="chart-section">${this._renderYearChart(monthly)}</div>` : ""}`;
       case "overview":
       default:
-        return `${this._config.show_kpis ? this._renderKPIs() : ""}
+        return `${this._config.show_kpis ? this._renderKPIs(last30) : ""}
           ${this._renderForecast(last30)}
           <div class="divider"></div>
-          ${this._renderTrafficAndAnomalies(last30)}`;
+          ${this._config.show_monthly ? `<div class="chart-section">${this._renderDailyChart(last30)}</div>` : ""}`;
     }
   }
 
-  _renderKPIs() {
+  _renderKPIs(last30 = []) {
     const ytdKwh = this._getState("sensor.octopus_analytics_ytd_verbrauch");
     const ytdCost = this._getState("sensor.octopus_analytics_ytd_kosten");
     const ytdAvg = this._getAttr("sensor.octopus_analytics_ytd_verbrauch", "avg_day_kwh");
@@ -366,6 +360,20 @@ class OctopusAnalyticsCard extends HTMLElement {
 
     const balance = this._getState("sensor.octopus_analytics_kontostand");
     const price = this._getState("sensor.octopus_analytics_strompreis");
+
+    const yesterdayN = parseFloat(yesterday);
+    const avg30 = this._avg((last30 || []).map((d) => d.kwh));
+    const target = parseFloat(this._config.daily_target_kwh) || avg30;
+    const diffAvgPct = avg30 > 0 ? ((yesterdayN - avg30) / avg30) * 100 : 0;
+    const diffTargetPct = target > 0 ? ((yesterdayN - target) / target) * 100 : 0;
+    const avgStatus = this._statusClass(diffAvgPct);
+    const targetStatus = this._statusClass(diffTargetPct);
+    const trafficBadges = !isNaN(yesterdayN) && avg30 > 0
+      ? `<div class="kpi-badges">
+          <span class="mini-traffic ${avgStatus}">Ø30 ${diffAvgPct > 0 ? "+" : ""}${diffAvgPct.toFixed(0)}%</span>
+          <span class="mini-traffic ${targetStatus}">Ziel ${diffTargetPct > 0 ? "+" : ""}${diffTargetPct.toFixed(0)}%</span>
+        </div>`
+      : "";
 
     // Month-over-month delta
     const monthN = parseFloat(monthKwh);
@@ -388,6 +396,7 @@ class OctopusAnalyticsCard extends HTMLElement {
           <div class="kpi-label">GESTERN</div>
           <div class="kpi-value">${this._formatKwh(yesterday)}</div>
           <div class="kpi-sub">${this._formatEur(yesterdayCost)}</div>
+          ${trafficBadges}
         </div>
         <div class="kpi-card accent-teal">
           <div class="kpi-label">DIESER MONAT</div>
@@ -508,6 +517,22 @@ class OctopusAnalyticsCard extends HTMLElement {
         color: rgba(255,255,255,0.5);
         margin-top: 2px;
       }
+      .kpi-badges {
+        display: flex;
+        gap: 4px;
+        margin-top: 6px;
+        flex-wrap: wrap;
+      }
+      .mini-traffic {
+        font-size: 9px;
+        line-height: 1;
+        border-radius: 999px;
+        padding: 3px 5px;
+        font-weight: 800;
+      }
+      .mini-traffic.good { background: rgba(80,220,120,0.16); color: rgba(80,220,120,0.95); }
+      .mini-traffic.warn { background: rgba(255,205,80,0.16); color: rgba(255,205,80,0.95); }
+      .mini-traffic.bad { background: rgba(255,100,80,0.16); color: rgba(255,100,80,0.95); }
       .delta { font-size: 10px; border-radius: 4px; padding: 1px 4px; }
       .delta.good { background: rgba(80,220,120,0.2); color: rgba(80,220,120,0.9); }
       .delta.bad { background: rgba(255,100,80,0.2); color: rgba(255,100,80,0.9); }
@@ -648,7 +673,7 @@ class OctopusAnalyticsCard extends HTMLElement {
       }
       .forecast-grid {
         display: grid;
-        grid-template-columns: repeat(3, 1fr);
+        grid-template-columns: repeat(2, 1fr);
         gap: 8px;
         margin-bottom: 8px;
       }
