@@ -9,8 +9,7 @@ import aiohttp
 
 _LOGGER = logging.getLogger(__name__)
 
-API_URL = "https://api.octopus.energy/v1/graphql/"
-AUTH_API_URL = API_URL
+API_URL = "https://api.oeg-kraken.energy/v1/graphql/"
 
 
 class OctopusAnalyticsApiError(Exception):
@@ -30,6 +29,7 @@ class OctopusAnalyticsApiClient:
         self._session = session
         self._token: str | None = None
         self._account_number: str | None = None
+        self._property_id: str | None = None
 
     async def _graphql(
         self,
@@ -41,7 +41,7 @@ class OctopusAnalyticsApiClient:
         """Execute a GraphQL query."""
         headers = {"Content-Type": "application/json"}
         if auth and self._token:
-            headers["Authorization"] = f"JWT {self._token}"
+            headers["Authorization"] = self._token
 
         payload: dict[str, Any] = {"query": query}
         if variables:
@@ -76,7 +76,7 @@ class OctopusAnalyticsApiClient:
             query,
             {"input": {"email": self._email, "password": self._password}},
             auth=False,
-            url=AUTH_API_URL,
+            url=API_URL,
         )
         token = data.get("obtainKrakenToken", {}).get("token")
         if not token:
@@ -95,7 +95,7 @@ class OctopusAnalyticsApiClient:
             }
         }
         """
-        data = await self._graphql(query, url=AUTH_API_URL)
+        data = await self._graphql(query, url=API_URL)
         accounts = data.get("viewer", {}).get("accounts", [])
         if not accounts:
             raise OctopusAnalyticsApiError("No accounts found")
@@ -103,32 +103,35 @@ class OctopusAnalyticsApiClient:
         return self._account_number
 
     async def get_meter_info(self) -> dict:
-        """Get electricity meter and tariff info."""
+        """Get electricity meter and tariff info from the Octopus Germany schema."""
         query = """
         query AccountDetails($accountNumber: String!) {
             account(accountNumber: $accountNumber) {
-                electricityAgreements {
-                    meterPoint {
-                        meters {
-                            serialNumber
+                allProperties {
+                    id
+                    electricityMalos {
+                        maloNumber
+                        meloNumber
+                        meter {
+                            id
+                            number
+                            meterType
+                            shouldReceiveSmartMeterData
                         }
-                        mpan
-                    }
-                    tariff {
-                        ... on StandardTariff {
-                            unitRate
-                            productCode
-                        }
-                        ... on DayNightTariff {
-                            dayRate
-                            productCode
-                        }
-                        ... on ThreeRateTariff {
-                            dayRate
-                            productCode
-                        }
-                        ... on HalfHourlyTariff {
-                            productCode
+                        agreements {
+                            product {
+                                code
+                            }
+                            unitRateInformation {
+                                ... on SimpleProductUnitRateInformation {
+                                    latestGrossUnitRateCentsPerKwh
+                                }
+                                ... on TimeOfUseProductUnitRateInformation {
+                                    rates {
+                                        latestGrossUnitRateCentsPerKwh
+                                    }
+                                }
+                            }
                         }
                     }
                 }
@@ -137,19 +140,30 @@ class OctopusAnalyticsApiClient:
         """
         data = await self._graphql(query, {"accountNumber": self._account_number})
         account = data.get("account") or {}
-        agreements = account.get("electricityAgreements") or []
+        properties = account.get("allProperties") or []
+        property_data = next(
+            (prop for prop in properties if prop.get("electricityMalos")),
+            properties[0] if properties else {},
+        )
+        self._property_id = property_data.get("id") or self._property_id
+
+        malos = property_data.get("electricityMalos") or []
+        malo = malos[0] if malos else {}
+        meter = malo.get("meter") or {}
+        agreements = malo.get("agreements") or []
         agreement = agreements[0] if agreements else {}
-        meter_point = agreement.get("meterPoint") or {}
-        meters = meter_point.get("meters") or []
-        tariff = agreement.get("tariff") or {}
+        unit_rate_info = agreement.get("unitRateInformation") or {}
+        rates = unit_rate_info.get("rates") or []
+        product = agreement.get("product") or {}
 
         return {
-            "serial_number": meters[0].get("serialNumber") if meters else None,
-            "melo_number": None,
-            "mpan": meter_point.get("mpan"),
-            "unit_rate": tariff.get("unitRate") or tariff.get("dayRate"),
+            "serial_number": meter.get("number"),
+            "melo_number": malo.get("meloNumber"),
+            "mpan": malo.get("maloNumber"),
+            "unit_rate": unit_rate_info.get("latestGrossUnitRateCentsPerKwh")
+            or (rates[0].get("latestGrossUnitRateCentsPerKwh") if rates else None),
             "standing_charge": None,
-            "product_code": tariff.get("productCode"),
+            "product_code": product.get("code"),
         }
 
     async def get_consumption(
@@ -158,42 +172,57 @@ class OctopusAnalyticsApiClient:
         end: date,
         frequency: str = "THIRTY_MIN_INTERVAL",
     ) -> list[dict]:
-        """Get electricity consumption data between two dates."""
-        grouping = {
-            "DAY_INTERVAL": "DAY",
-            "THIRTY_MIN_INTERVAL": "HALF_HOUR",
-            "HOUR_INTERVAL": "HOUR",
-        }.get(frequency, "HALF_HOUR")
-        start_at = datetime.combine(start, time.min).isoformat()
+        """Get electricity consumption data from property measurements."""
+        if not self._property_id:
+            await self.get_meter_info()
+        if not self._property_id:
+            return []
+
+        reading_frequency = {
+            "DAY_INTERVAL": "DAY_INTERVAL",
+            "THIRTY_MIN_INTERVAL": "RAW_INTERVAL",
+            "HOUR_INTERVAL": "HOUR_INTERVAL",
+        }.get(frequency, "RAW_INTERVAL")
 
         query = """
         query ConsumptionData(
             $accountNumber: String!
-            $startAt: DateTime!
-            $grouping: ConsumptionGroupings!
+            $propertyId: ID!
+            $startDate: Date!
+            $endDate: Date!
+            $frequency: ReadingFrequencyType!
             $after: String
         ) {
             account(accountNumber: $accountNumber) {
-                electricityAgreements {
-                    meterPoint {
-                        meters {
-                            consumption(
-                                startAt: $startAt
-                                grouping: $grouping
-                                timezone: "Europe/Berlin"
-                                first: 100
-                                after: $after
-                            ) {
-                                pageInfo {
-                                    hasNextPage
-                                    endCursor
+                property(id: $propertyId) {
+                    measurements(
+                        utilityFilters: {
+                            electricityFilters: {
+                                readingFrequencyType: $frequency
+                                readingQuality: COMBINED
+                            }
+                        }
+                        startOn: $startDate
+                        endOn: $endDate
+                        first: 100
+                        after: $after
+                    ) {
+                        pageInfo {
+                            hasNextPage
+                            endCursor
+                        }
+                        edges {
+                            node {
+                                ... on IntervalMeasurementType {
+                                    startAt
+                                    endAt
+                                    unit
+                                    value
                                 }
-                                edges {
-                                    node {
-                                        startAt
-                                        endAt
-                                        value
-                                    }
+                                ... on MeasurementType {
+                                    readAt
+                                    unit
+                                    value
                                 }
                             }
                         }
@@ -210,40 +239,35 @@ class OctopusAnalyticsApiClient:
                 query,
                 {
                     "accountNumber": self._account_number,
-                    "startAt": start_at,
-                    "grouping": grouping,
+                    "propertyId": self._property_id,
+                    "startDate": start.isoformat(),
+                    "endDate": end.isoformat(),
+                    "frequency": reading_frequency,
                     "after": after,
                 },
             )
-            has_next_page = False
-            next_after = None
-            account = data.get("account") or {}
-            agreements = account.get("electricityAgreements") or []
-            for agreement in agreements:
-                meter_point = agreement.get("meterPoint") or {}
-                for meter in meter_point.get("meters") or []:
-                    consumption = meter.get("consumption") or {}
-                    page_info = consumption.get("pageInfo") or {}
-                    has_next_page = bool(page_info.get("hasNextPage"))
-                    next_after = page_info.get("endCursor")
+            measurements = (
+                ((data.get("account") or {}).get("property") or {}).get("measurements")
+                or {}
+            )
+            page_info = measurements.get("pageInfo") or {}
+            for edge in measurements.get("edges", []):
+                reading = edge.get("node") or {}
+                start_dt = reading.get("startAt") or reading.get("readAt")
+                if not start_dt:
+                    continue
+                results.append(
+                    {
+                        "startDt": start_dt,
+                        "endDt": reading.get("endAt") or start_dt,
+                        "value": reading.get("value"),
+                        "unit": reading.get("unit"),
+                    }
+                )
 
-                    for edge in consumption.get("edges", []):
-                        reading = edge.get("node") or {}
-                        start_dt = reading.get("startAt")
-                        if not start_dt:
-                            continue
-                        results.append(
-                            {
-                                "startDt": start_dt,
-                                "endDt": reading.get("endAt") or start_dt,
-                                "value": reading.get("value"),
-                                "unit": "kWh",
-                            }
-                        )
-
-            if not has_next_page or not next_after:
+            if not page_info.get("hasNextPage") or not page_info.get("endCursor"):
                 break
-            after = next_after
+            after = page_info.get("endCursor")
 
         return results
 
