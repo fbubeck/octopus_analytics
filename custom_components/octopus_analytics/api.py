@@ -277,11 +277,29 @@ class OctopusAnalyticsApiClient:
         query AccountBalance($accountNumber: String!) {
             account(accountNumber: $accountNumber) {
                 balance
+                ledgers {
+                    balance
+                    ledgerType
+                }
             }
         }
         """
         data = await self._graphql(query, {"accountNumber": self._account_number})
-        balance = data.get("account", {}).get("balance", 0)
+        account = data.get("account") or {}
+        ledgers = account.get("ledgers") or []
+
+        electricity_ledger = next(
+            (
+                ledger
+                for ledger in ledgers
+                if ledger.get("ledgerType") == "ELECTRICITY_LEDGER"
+            ),
+            None,
+        )
+        if electricity_ledger is not None:
+            return round((electricity_ledger.get("balance") or 0) / 100, 2)
+
+        balance = account.get("balance", 0)
         return round(balance / 100, 2)  # API returns cents
 
     async def ensure_authenticated(self) -> None:
