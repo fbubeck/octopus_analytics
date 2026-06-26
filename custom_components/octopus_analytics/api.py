@@ -10,7 +10,7 @@ import aiohttp
 _LOGGER = logging.getLogger(__name__)
 
 API_URL = "https://api.octopus.energy/v1/graphql/"
-AUTH_API_URL = "https://api.oeg-kraken.energy/v1/graphql/"
+AUTH_API_URL = API_URL
 
 
 class OctopusAnalyticsApiError(Exception):
