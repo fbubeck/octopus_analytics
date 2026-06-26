@@ -256,22 +256,22 @@ class OctopusAnalyticsCard extends HTMLElement {
     return `
       <div class="forecast-grid">
         <div class="forecast-card accent-blue">
-          <div class="kpi-label">PROGNOSE MONATSENDE</div>
-          <div class="kpi-value">${this._formatKwh(projectedKwh)}</div>
-          <div class="kpi-sub">${this._formatEur(projectedCost)} · noch ${remaining} Tage</div>
+          <div class="kpi-label">MONATSENDE PROG.</div>
+          <div class="kpi-value">${this._formatEur(projectedCost)}</div>
+          <div class="kpi-sub">Ist ${this._formatEur(monthCost)} · Prog. ${this._formatKwh(projectedKwh)}</div>
         </div>
         <div class="forecast-card ${budgetDelta === null ? "" : budgetDelta >= 0 ? "accent-teal" : "accent-red"}">
-          <div class="kpi-label">BUDGET</div>
+          <div class="kpi-label">BUDGET PLAN</div>
           <div class="kpi-value">${budgetDelta === null ? "nicht gesetzt" : this._formatEur(budget)}</div>
-          <div class="kpi-sub">Prognose ${this._formatEur(projectedCost)} · ${budgetDelta === null ? "YAML: monthly_budget_eur setzen" : budgetDelta >= 0 ? this._formatEur(budgetDelta) + " Puffer" : this._formatEur(Math.abs(budgetDelta)) + " drüber"}</div>
+          <div class="kpi-sub">Prog. ${this._formatEur(projectedCost)} · Δ ${budgetDelta === null ? "—" : (budgetDelta >= 0 ? "+" : "−") + this._formatEur(Math.abs(budgetDelta))}</div>
         </div>
         <div class="forecast-card ${paymentDelta === null ? "" : paymentDelta >= 0 ? "accent-teal" : "accent-red"}">
-          <div class="kpi-label">ABSCHLAG</div>
+          <div class="kpi-label">ABSCHLAG PLAN</div>
           <div class="kpi-value">${paymentDelta === null ? "nicht gesetzt" : this._formatEur(payment)}</div>
-          <div class="kpi-sub">Prognose ${this._formatEur(projectedCost)} · ${paymentDelta === null ? "YAML: monthly_payment_eur setzen" : paymentDelta >= 0 ? this._formatEur(paymentDelta) + " Puffer" : this._formatEur(Math.abs(paymentDelta)) + " Nachzahlung"}</div>
+          <div class="kpi-sub">Prog. ${this._formatEur(projectedCost)} · Δ ${paymentDelta === null ? "—" : (paymentDelta >= 0 ? "+" : "−") + this._formatEur(Math.abs(paymentDelta))}</div>
         </div>
       </div>
-      <div class="mini-note">Basis: aktueller Monatsschnitt ${avgKwh.toFixed(2)} kWh/Tag und aktuelle geschätzte Kosten.</div>`;
+      <div class="mini-note">Ist = bisher im Monat · Prog. = Hochrechnung bis Monatsende · Δ = Plan minus Prognose</div>`;
   }
 
   _renderTrafficAndAnomalies(last30) {
