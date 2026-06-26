@@ -8,6 +8,8 @@ class OctopusAnalyticsCard extends HTMLElement {
     super();
     this.attachShadow({ mode: "open" });
     this._activeTab = "overview";
+    this._dailyPage = 0;
+    this._monthYearOffset = 0;
   }
 
   setConfig(config) {
@@ -126,11 +128,23 @@ class OctopusAnalyticsCard extends HTMLElement {
       </div>`;
   }
 
-  _renderDailyChart(last30) {
+  _sliceDailyWindow(dailyData) {
+    const data = [...(dailyData || [])].sort((a, b) => String(a.date).localeCompare(String(b.date)));
+    const pageSize = 30;
+    const maxPage = Math.max(0, Math.ceil(data.length / pageSize) - 1);
+    this._dailyPage = Math.min(Math.max(this._dailyPage || 0, 0), maxPage);
+    const end = data.length - this._dailyPage * pageSize;
+    const start = Math.max(0, end - pageSize);
+    return { window: data.slice(start, end), maxPage };
+  }
+
+  _renderDailyChart(dailyData) {
+    const { window: last30, maxPage } = this._sliceDailyWindow(dailyData);
     if (!last30 || !last30.length) {
       return `<div class="no-data">Keine Tagesdaten verfügbar</div>`;
     }
 
+    const period = `${this._formatDateDE(last30[0]?.date)} – ${this._formatDateDE(last30[last30.length - 1]?.date)}`;
     const values = last30.map((d) => d.kwh || 0);
     const maxVal = Math.max(...values, 0.001);
 
@@ -151,8 +165,12 @@ class OctopusAnalyticsCard extends HTMLElement {
 
     return `
       <div class="chart-header">
-        <span class="chart-title">Tagesverbrauch – letzte 30 Tage</span>
-        <span class="chart-total">max ${maxVal.toFixed(2)} kWh</span>
+        <span class="chart-title">Tagesverbrauch</span>
+        <span class="chart-total">${period} · max ${maxVal.toFixed(2)} kWh</span>
+      </div>
+      <div class="chart-nav">
+        <button class="chart-nav-btn" data-action="daily-prev" ${this._dailyPage >= maxPage ? "disabled" : ""}>‹ Zurück</button>
+        <button class="chart-nav-btn" data-action="daily-next" ${this._dailyPage <= 0 ? "disabled" : ""}>Vor ›</button>
       </div>
       <div class="chart-body">
         <div class="chart-area" style="margin-left:0">
@@ -170,7 +188,11 @@ class OctopusAnalyticsCard extends HTMLElement {
     }
 
     const now = new Date();
-    const year = now.getFullYear();
+    const availableYears = Object.keys(monthly || {}).map((k) => parseInt(k.substring(0, 4), 10)).filter((y) => !isNaN(y));
+    const minYear = availableYears.length ? Math.min(...availableYears) : now.getFullYear();
+    const maxYear = now.getFullYear();
+    this._monthYearOffset = Math.min(Math.max(this._monthYearOffset || 0, 0), Math.max(0, maxYear - minYear));
+    const year = maxYear - this._monthYearOffset;
     const months = [];
     for (let month = 1; month <= 12; month++) {
       const key = `${year}-${String(month).padStart(2, "0")}`;
@@ -199,6 +221,10 @@ class OctopusAnalyticsCard extends HTMLElement {
       <div class="chart-header">
         <span class="chart-title">Monatsverbrauch YTD – ${year}</span>
         <span class="chart-total">∑ ${total.toFixed(1)} kWh</span>
+      </div>
+      <div class="chart-nav">
+        <button class="chart-nav-btn" data-action="month-prev" ${year <= minYear ? "disabled" : ""}>‹ Vorjahr</button>
+        <button class="chart-nav-btn" data-action="month-next" ${year >= maxYear ? "disabled" : ""}>Folgejahr ›</button>
       </div>
       <div class="chart-body">
         <div class="chart-area" style="margin-left:0">
@@ -377,24 +403,29 @@ class OctopusAnalyticsCard extends HTMLElement {
     const firstWeekday = (new Date(year, month, 1).getDay() + 6) % 7; // Monday=0
     const byDate = Object.fromEntries((last30 || []).map((d) => [d.date, d]));
     const monthPrefix = `${year}-${String(month + 1).padStart(2, "0")}`;
-    const vals = Object.values(byDate).filter((d) => d.date?.startsWith(monthPrefix)).map((d) => d.kwh || 0);
+    const vals = Object.values(byDate).filter((d) => d.date?.startsWith(monthPrefix)).map((d) => d.kwh || 0).filter((v) => v > 0);
+    const minVal = vals.length ? Math.min(...vals) : 0;
     const maxVal = Math.max(...vals, 0.001);
+    const heatRange = Math.max(maxVal - minVal, 0.001);
     const cells = [];
     for (let i = 0; i < firstWeekday; i++) cells.push(`<div class="heat-cell empty"></div>`);
     for (let d = 1; d <= days; d++) {
       const key = `${monthPrefix}-${String(d).padStart(2, "0")}`;
       const val = byDate[key]?.kwh || 0;
-      const intensity = val / maxVal;
-      const alpha = val ? 0.18 + intensity * 0.72 : 0.04;
-      cells.push(`<div class="heat-cell has-tooltip" data-tooltip="${this._tooltip(`${this._formatDateDE(key)} · ${val ? val.toFixed(3) + " kWh" : "keine Daten"}`)}" style="background:rgba(80,200,255,${alpha})"><span>${d}</span></div>`);
+      const intensity = val ? Math.max(0, Math.min(1, (val - minVal) / heatRange)) : 0;
+      const alpha = val ? 0.18 + intensity * 0.82 : 0.035;
+      const r = Math.round(60 + intensity * 195);
+      const g = Math.round(220 - intensity * 150);
+      const b = Math.round(255 - intensity * 170);
+      cells.push(`<div class="heat-cell has-tooltip" data-tooltip="${this._tooltip(`${this._formatDateDE(key)} · ${val ? val.toFixed(3) + " kWh" : "keine Daten"}`)}" style="background:rgba(${r},${g},${b},${alpha})"><span>${d}</span></div>`);
     }
     return `
-      <div class="chart-header"><span class="chart-title">Heatmap Kalender – ${this._monthLabel(monthPrefix)} ${year}</span><span class="chart-total">max ${maxVal.toFixed(2)} kWh</span></div>
+      <div class="chart-header"><span class="chart-title">Heatmap Kalender – ${this._monthLabel(monthPrefix)} ${year}</span><span class="chart-total">min ${minVal.toFixed(2)} · max ${maxVal.toFixed(2)} kWh</span></div>
       <div class="weekdays"><span>Mo</span><span>Di</span><span>Mi</span><span>Do</span><span>Fr</span><span>Sa</span><span>So</span></div>
       <div class="heatmap">${cells.join("")}</div>`;
   }
 
-  _renderActiveTab(hourlyData, last30, monthly) {
+  _renderActiveTab(hourlyData, last30, monthly, dailyHistory) {
     switch (this._activeTab) {
       case "forecast":
         return `${this._renderForecast(last30, monthly)}<div class="divider"></div>${this._renderTrafficAndAnomalies(last30)}`;
@@ -403,13 +434,13 @@ class OctopusAnalyticsCard extends HTMLElement {
       case "charts":
         return `${this._config.show_hourly ? `<div class="chart-section">${this._renderHourlyChart(hourlyData)}</div>` : ""}
           ${this._config.show_hourly && this._config.show_monthly ? '<div class="divider"></div>' : ""}
-          ${this._config.show_monthly ? `<div class="chart-section">${this._renderDailyChart(last30)}</div><div class="divider"></div><div class="chart-section">${this._renderYearChart(monthly)}</div>` : ""}`;
+          ${this._config.show_monthly ? `<div class="chart-section">${this._renderDailyChart(dailyHistory)}</div><div class="divider"></div><div class="chart-section">${this._renderYearChart(monthly)}</div>` : ""}`;
       case "overview":
       default:
         return `${this._config.show_kpis ? this._renderKPIs(last30) : ""}
           ${this._renderPaymentPlanning(last30)}
           <div class="divider"></div>
-          ${this._config.show_monthly ? `<div class="chart-section">${this._renderDailyChart(last30)}</div>` : ""}`;
+          ${this._config.show_monthly ? `<div class="chart-section">${this._renderDailyChart(dailyHistory)}</div>` : ""}`;
     }
   }
 
@@ -439,7 +470,7 @@ class OctopusAnalyticsCard extends HTMLElement {
     const diffAvgPct = avg30 > 0 ? ((yesterdayN - avg30) / avg30) * 100 : 0;
     const avgStatus = this._statusClass(diffAvgPct);
     const yesterdayTrend = !isNaN(yesterdayN) && avg30 > 0
-      ? `<span class="trend-chip ${avgStatus}">${diffAvgPct > 0 ? "↑" : "↓"} ${Math.abs(diffAvgPct).toFixed(0)}% vs Ø30</span>`
+      ? `<span class="trend-chip ${avgStatus}">${diffAvgPct > 0 ? "↑" : "↓"} ${Math.abs(diffAvgPct).toFixed(0)}% </span>`
       : "";
 
     // Month-over-month delta
@@ -449,7 +480,7 @@ class OctopusAnalyticsCard extends HTMLElement {
       ? Math.round(((monthN - prevN) / prevN) * 100)
       : null;
     const deltaStr = delta !== null
-      ? `<span class="trend-chip ${delta <= 0 ? "good" : "bad"}">${delta > 0 ? "↑" : "↓"} ${Math.abs(delta)}% vs VM</span>`
+      ? `<span class="trend-chip ${delta <= 0 ? "good" : "bad"}">${delta > 0 ? "↑" : "↓"} ${Math.abs(delta)}% </span>`
       : "";
 
     const peakStr = monthPeakDate
@@ -648,6 +679,26 @@ class OctopusAnalyticsCard extends HTMLElement {
         font-size: 13px;
         font-weight: 700;
         color: rgba(80,200,255,0.95);
+      }
+      .chart-nav {
+        display: flex;
+        justify-content: flex-end;
+        gap: 6px;
+        margin: -2px 0 6px;
+      }
+      .chart-nav-btn {
+        border: 1px solid rgba(255,255,255,0.12);
+        background: rgba(255,255,255,0.06);
+        color: rgba(255,255,255,0.72);
+        border-radius: 999px;
+        padding: 4px 9px;
+        font-size: 10px;
+        font-weight: 800;
+        cursor: pointer;
+      }
+      .chart-nav-btn:disabled {
+        opacity: 0.32;
+        cursor: not-allowed;
       }
       .chart-body {
         display: flex;
@@ -911,6 +962,7 @@ class OctopusAnalyticsCard extends HTMLElement {
 
     const hourlyData = this._getAttr("sensor.octopus_analytics_verbrauch_gestern", "hourly") || [];
     const last30 = this._getAttr("sensor.octopus_analytics_letzte_30_tage_json", "data") || [];
+    const dailyHistory = this._getAttr("sensor.octopus_analytics_tageshistorie_json", "data") || last30;
     const monthly = this._getAttr("sensor.octopus_analytics_monatszusammenfassung_json", "data") || {};
 
     this.shadowRoot.innerHTML = `
@@ -918,12 +970,22 @@ class OctopusAnalyticsCard extends HTMLElement {
       <ha-card>
         <div class="card-title">${this._config.title}</div>
         ${this._renderTabs()}
-        ${this._renderActiveTab(hourlyData, last30, monthly)}
+        ${this._renderActiveTab(hourlyData, last30, monthly, dailyHistory)}
       </ha-card>`;
 
     this.shadowRoot.querySelectorAll(".tab").forEach((button) => {
       button.addEventListener("click", () => {
         this._activeTab = button.dataset.tab;
+        this._render();
+      });
+    });
+    this.shadowRoot.querySelectorAll("[data-action]").forEach((button) => {
+      button.addEventListener("click", () => {
+        const action = button.dataset.action;
+        if (action === "daily-prev") this._dailyPage += 1;
+        if (action === "daily-next") this._dailyPage = Math.max(0, this._dailyPage - 1);
+        if (action === "month-prev") this._monthYearOffset += 1;
+        if (action === "month-next") this._monthYearOffset = Math.max(0, this._monthYearOffset - 1);
         this._render();
       });
     });

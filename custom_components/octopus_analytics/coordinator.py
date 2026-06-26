@@ -72,6 +72,7 @@ class OctopusAnalyticsCoordinator(DataUpdateCoordinator):
             # Aggregations
             monthly = aggregate_to_monthly(daily)
             ytd = compute_ytd(daily)
+            daily_history = get_last_n_days(daily, 365)
             last_30 = get_last_n_days(daily, 30)
 
             # Current month data
@@ -161,6 +162,7 @@ class OctopusAnalyticsCoordinator(DataUpdateCoordinator):
                 ),
                 "hourly_yesterday": self._hourly_yesterday,
                 "last_30_days": last_30,
+                "daily_history": daily_history,
                 "monthly": monthly,
                 "balance": balance,
                 "unit_rate": unit_rate_eur,

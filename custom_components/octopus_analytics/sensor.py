@@ -198,6 +198,13 @@ SENSOR_DESCRIPTIONS: list[OctopusSensorEntityDescription] = [
         attr_fn=lambda d: {"data": d["last_30_days"]},
     ),
     OctopusSensorEntityDescription(
+        key="daily_history",
+        name="Tageshistorie JSON",
+        icon="mdi:calendar-range",
+        value_fn=lambda d: len(d["daily_history"]),
+        attr_fn=lambda d: {"data": d["daily_history"]},
+    ),
+    OctopusSensorEntityDescription(
         key="monthly_summary",
         name="Monatszusammenfassung JSON",
         icon="mdi:chart-timeline-variant",

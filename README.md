@@ -97,6 +97,7 @@ anomaly_threshold_percent: 30 # optional: Schwelle für Anomalien
 | `sensor.octopus_analytics_strompreis` | Aktueller Strompreis €/kWh |
 | `sensor.octopus_analytics_grundpreis_pro_tag` | Grundpreis €/Tag |
 | `sensor.octopus_analytics_letzte_30_tage_json` | 30-Tage Daten als JSON-Attribut |
+| `sensor.octopus_analytics_tageshistorie_json` | Tageshistorie bis 365 Tage als JSON-Attribut |
 | `sensor.octopus_analytics_monatszusammenfassung_json` | Alle Monate als JSON-Attribut |
 
 ## Update-Intervall
