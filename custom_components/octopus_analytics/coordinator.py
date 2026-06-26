@@ -47,12 +47,13 @@ class OctopusAnalyticsCoordinator(DataUpdateCoordinator):
             await self.client.ensure_authenticated()
 
             today = date.today()
-            year_start = date(today.year, 1, 1)
+            history_start = today - timedelta(days=365)
 
-            # Fetch YTD consumption (from Jan 1 to yesterday)
+            # Fetch rolling 12 months of daily consumption. YTD is still computed
+            # from this data by filtering to the current calendar year.
             yesterday = today - timedelta(days=1)
             raw = await self.client.get_consumption(
-                year_start, yesterday, "DAY_INTERVAL"
+                history_start, yesterday, "DAY_INTERVAL"
             )
 
             if not raw and self._daily_cache:
