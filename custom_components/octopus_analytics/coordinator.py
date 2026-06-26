@@ -51,7 +51,9 @@ class OctopusAnalyticsCoordinator(DataUpdateCoordinator):
 
             # Fetch YTD consumption (from Jan 1 to yesterday)
             yesterday = today - timedelta(days=1)
-            raw = await self.client.get_consumption(year_start, yesterday)
+            raw = await self.client.get_consumption(
+                year_start, yesterday, "DAY_INTERVAL"
+            )
 
             if not raw and self._daily_cache:
                 _LOGGER.warning("No consumption data returned, using cached data")
@@ -61,7 +63,9 @@ class OctopusAnalyticsCoordinator(DataUpdateCoordinator):
                 self._daily_cache = daily
 
             # Hourly for yesterday
-            hourly_raw = await self.client.get_consumption(yesterday, yesterday)
+            hourly_raw = await self.client.get_consumption(
+                yesterday, yesterday, "THIRTY_MIN_INTERVAL"
+            )
             self._hourly_yesterday = aggregate_to_hourly(hourly_raw)
 
             # Aggregations
@@ -101,8 +105,8 @@ class OctopusAnalyticsCoordinator(DataUpdateCoordinator):
                 self._meter_info = await self.client.get_meter_info()
 
             # Unit rate for cost calculations
-            unit_rate = self._meter_info.get("unit_rate", 0) or 0
-            unit_rate_eur = round(unit_rate / 100, 6) if unit_rate else 0.271915
+            unit_rate = self._meter_info.get("unit_rate")
+            unit_rate_eur = round(float(unit_rate) / 100, 6) if unit_rate else 0.271915
 
             return {
                 "ytd": ytd,

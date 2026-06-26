@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import logging
-from datetime import date, datetime, timedelta
+from datetime import date
 from typing import Any
 
 import aiohttp
@@ -87,22 +87,32 @@ class OctopusAnalyticsApiClient:
         return self._account_number
 
     async def get_meter_info(self) -> dict:
-        """Get electricity meter info."""
+        """Get electricity meter and tariff info.
+
+        Octopus Energy Germany exposes electricity data via the account property
+        and MaLo model, not via the UK-style electricityAgreements field.
+        """
         query = """
         query AccountDetails($accountNumber: String!) {
             account(accountNumber: $accountNumber) {
-                electricityAgreements(active: true) {
-                    meterPoint {
-                        meters(includeInactive: false) {
-                            serialNumber
+                property {
+                    electricityMalos {
+                        maloNumber
+                        meters {
+                            number
+                            meloNumber
+                            hasSmartMeterGateway
                         }
-                        mpan
-                    }
-                    tariff {
-                        ... on SimpleProductTariff {
-                            unitRate
-                            standingCharge
-                            productCode
+                        agreements {
+                            isActive
+                            product {
+                                code
+                            }
+                            unitRateInformation {
+                                ... on SimpleProductUnitRateInformation {
+                                    latestGrossUnitRateCentsPerKwh
+                                }
+                            }
                         }
                     }
                 }
@@ -110,41 +120,70 @@ class OctopusAnalyticsApiClient:
         }
         """
         data = await self._graphql(query, {"accountNumber": self._account_number})
-        agreements = data.get("account", {}).get("electricityAgreements", [])
-        if not agreements:
+        account = data.get("account") or {}
+        property_data = account.get("property") or {}
+        malos = property_data.get("electricityMalos", [])
+        if not malos:
             return {}
-        agreement = agreements[0]
-        meter_point = agreement.get("meterPoint", {})
-        meters = meter_point.get("meters", [])
-        tariff = agreement.get("tariff", {})
+
+        malo = malos[0]
+        meters = malo.get("meters", [])
+        agreements = malo.get("agreements", [])
+        active_agreement = next(
+            (agreement for agreement in agreements if agreement.get("isActive")),
+            agreements[0] if agreements else {},
+        )
+        unit_rate_info = active_agreement.get("unitRateInformation") or {}
+        product = active_agreement.get("product") or {}
+
         return {
-            "serial_number": meters[0]["serialNumber"] if meters else None,
-            "mpan": meter_point.get("mpan"),
-            "unit_rate": tariff.get("unitRate"),
-            "standing_charge": tariff.get("standingCharge"),
-            "product_code": tariff.get("productCode"),
+            "serial_number": meters[0].get("number") if meters else None,
+            "melo_number": meters[0].get("meloNumber") if meters else None,
+            "mpan": malo.get("maloNumber"),
+            "unit_rate": unit_rate_info.get("latestGrossUnitRateCentsPerKwh"),
+            "standing_charge": None,
+            "product_code": product.get("code"),
         }
 
-    async def get_consumption(self, start: date, end: date) -> list[dict]:
-        """Get half-hourly consumption data between two dates."""
+    async def get_consumption(
+        self,
+        start: date,
+        end: date,
+        frequency: str = "THIRTY_MIN_INTERVAL",
+    ) -> list[dict]:
+        """Get electricity consumption data between two dates."""
         query = """
         query ConsumptionData(
             $accountNumber: String!
             $startDate: Date!
             $endDate: Date!
+            $frequency: ReadingFrequencyType!
         ) {
             account(accountNumber: $accountNumber) {
-                electricityAgreements(active: false) {
-                    meterPoint {
-                        consumption(
-                            startDate: $startDate
-                            endDate: $endDate
-                            grouping: HALF_HOUR
-                        ) {
-                            startDt
-                            endDt
-                            value
-                            unit
+                property {
+                    measurements(
+                        startOn: $startDate
+                        endOn: $endDate
+                        timezone: "Europe/Berlin"
+                        utilityFilters: {
+                            electricityFilters: {
+                                readingFrequencyType: $frequency
+                                readingDirection: CONSUMPTION
+                                readingQuality: COMBINED
+                            }
+                        }
+                        first: 10000
+                    ) {
+                        edges {
+                            node {
+                                value
+                                unit
+                                readAt
+                                ... on IntervalMeasurementType {
+                                    startAt
+                                    endAt
+                                }
+                            }
                         }
                     }
                 }
@@ -157,13 +196,34 @@ class OctopusAnalyticsApiClient:
                 "accountNumber": self._account_number,
                 "startDate": start.isoformat(),
                 "endDate": end.isoformat(),
+                "frequency": frequency,
             },
         )
+        account = data.get("account") or {}
+        property_data = account.get("property") or {}
+        measurements = property_data.get("measurements") or {}
+        edges = measurements.get("edges", [])
         results = []
-        agreements = data.get("account", {}).get("electricityAgreements", [])
-        for agreement in agreements:
-            consumption = agreement.get("meterPoint", {}).get("consumption", [])
-            results.extend(consumption)
+        for edge in edges:
+            node = edge.get("node") or {}
+            start_at = node.get("startAt") or node.get("readAt")
+            if not start_at:
+                continue
+
+            value = node.get("value")
+            unit = node.get("unit")
+            if value is not None and unit in ("WATT_HOURS", "Wh"):
+                value = float(value) / 1000
+                unit = "KILOWATT_HOURS"
+
+            results.append(
+                {
+                    "startDt": start_at,
+                    "endDt": node.get("endAt") or start_at,
+                    "value": value,
+                    "unit": unit,
+                }
+            )
         return results
 
     async def get_account_balance(self) -> float:
