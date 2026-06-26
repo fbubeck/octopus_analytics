@@ -96,7 +96,7 @@ class OctopusAnalyticsApiClient:
         query = """
         query AccountDetails($accountNumber: String!) {
             account(accountNumber: $accountNumber) {
-                marketSupplyAgreements(active: true, first: 3) {
+                marketSupplyAgreements(active: true, first: 10) {
                     edges {
                         node {
                             isActive
@@ -163,7 +163,7 @@ class OctopusAnalyticsApiClient:
             $after: String
         ) {
             account(accountNumber: $accountNumber) {
-                marketSupplyAgreements(active: true, first: 3) {
+                marketSupplyAgreements(first: 10) {
                     edges {
                         node {
                             supplyPoint {
