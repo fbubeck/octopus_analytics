@@ -9,6 +9,7 @@ class OctopusAnalyticsCard extends HTMLElement {
     this.attachShadow({ mode: "open" });
     this._activeTab = "overview";
     this._dailyMonthOffset = 0;
+    this._hourlyDayOffset = 0;
     this._monthYearOffset = 0;
   }
 
@@ -70,24 +71,44 @@ class OctopusAnalyticsCard extends HTMLElement {
     return names[m - 1] || monthKey;
   }
 
+  _sliceHourlyWindow(hourlyData) {
+    const data = [...(hourlyData || [])]
+      .filter((h) => h.start)
+      .sort((a, b) => String(a.start).localeCompare(String(b.start)));
+    const dayKeys = [...new Set(data.map((h) => h.start.substring(0, 10)))];
+    const maxOffset = Math.max(0, dayKeys.length - 1);
+    this._hourlyDayOffset = Math.min(
+      Math.max(this._hourlyDayOffset || 0, 0),
+      maxOffset
+    );
+    const selectedDay = dayKeys[dayKeys.length - 1 - this._hourlyDayOffset];
+    return {
+      window: data.filter((h) => h.start.startsWith(selectedDay)),
+      maxOffset,
+      selectedDay,
+      dayCount: dayKeys.length,
+    };
+  }
+
   _renderHourlyChart(hourlyData) {
-    if (!hourlyData || !hourlyData.length) {
+    const { window: selectedHourly, maxOffset, selectedDay, dayCount } = this._sliceHourlyWindow(hourlyData);
+    if (!selectedHourly || !selectedHourly.length) {
       return `<div class="no-data">Keine Stundendaten verfügbar</div>`;
     }
 
-    const values = hourlyData.map((h) => h.kwh || 0);
+    const values = selectedHourly.map((h) => h.kwh || 0);
     const maxVal = Math.max(...values, 0.001);
     const minVal = Math.min(...values);
     const range = maxVal - minVal;
     const scaleMin = Math.max(0, minVal - range * 0.1);
 
     const total = values.reduce((a, b) => a + b, 0);
-    const dateStr = hourlyData[0]?.start?.substring(0, 10) || "";
+    const dateStr = selectedDay || selectedHourly[0]?.start?.substring(0, 10) || "";
     const displayDate = dateStr
       ? dateStr.split("-").reverse().join(".")
       : "Gestern";
 
-    const bars = hourlyData
+    const bars = selectedHourly
       .map((h, i) => {
         const val = h.kwh || 0;
         const pct =
@@ -113,6 +134,11 @@ class OctopusAnalyticsCard extends HTMLElement {
         <span class="chart-title">Stundenverbrauch ${displayDate}</span>
         <span class="chart-total">∑ ${total.toFixed(3)} kWh</span>
       </div>
+      <div class="chart-nav">
+        <button class="chart-nav-btn" data-action="hourly-prev" ${this._hourlyDayOffset >= maxOffset ? "disabled" : ""} title="Vorherigen Tag anzeigen">‹ Tag</button>
+        <button class="chart-nav-btn" data-action="hourly-next" ${this._hourlyDayOffset <= 0 ? "disabled" : ""} title="Nächsten Tag anzeigen">Tag ›</button>
+      </div>
+      ${dayCount <= 1 ? `<div class="mini-note">Tagesnavigation aktiv, sobald Stundendaten aus mehreren Tagen vorhanden sind.</div>` : ""}
       <div class="chart-body">
         <div class="y-axis">
           <span>${yTop}</span>
@@ -971,9 +997,10 @@ class OctopusAnalyticsCard extends HTMLElement {
   _render() {
     if (!this._hass || !this._config) return;
 
-    const hourlyData = this._getAttr("sensor.octopus_analytics_verbrauch_gestern", "hourly") || [];
+    const yesterdayEntity = "sensor.octopus_analytics_verbrauch_gestern";
+    const hourlyData = this._getAttr(yesterdayEntity, "hourly_history") || this._getAttr(yesterdayEntity, "hourly") || [];
     const last30 = this._getAttr("sensor.octopus_analytics_letzte_30_tage_json", "data") || [];
-    let dailyHistory = this._getAttr("sensor.octopus_analytics_tageshistorie_json", "data") || [];
+    let dailyHistory = this._getAttr("sensor.octopus_analytics_tageshistorie_json", "data") || this._getAttr("sensor.octopus_analytics_letzte_30_tage_json", "history") || [];
 
     // Be tolerant if Home Assistant generated a slightly different entity_id
     // or the new history entity was added after an update. Use the longest
@@ -1006,6 +1033,8 @@ class OctopusAnalyticsCard extends HTMLElement {
     this.shadowRoot.querySelectorAll("[data-action]").forEach((button) => {
       button.addEventListener("click", () => {
         const action = button.dataset.action;
+        if (action === "hourly-prev") this._hourlyDayOffset += 1;
+        if (action === "hourly-next") this._hourlyDayOffset = Math.max(0, this._hourlyDayOffset - 1);
         if (action === "daily-prev") this._dailyMonthOffset += 1;
         if (action === "daily-next") this._dailyMonthOffset = Math.max(0, this._dailyMonthOffset - 1);
         if (action === "month-prev") this._monthYearOffset += 1;

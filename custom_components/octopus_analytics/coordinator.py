@@ -39,6 +39,7 @@ class OctopusAnalyticsCoordinator(DataUpdateCoordinator):
         self.client = client
         self._daily_cache: list[dict] = []
         self._hourly_yesterday: list[dict] = []
+        self._hourly_history: list[dict] = []
         self._meter_info: dict = {}
 
     async def _async_update_data(self) -> dict[str, Any]:
@@ -63,11 +64,17 @@ class OctopusAnalyticsCoordinator(DataUpdateCoordinator):
                 daily = aggregate_to_daily(raw)
                 self._daily_cache = daily
 
-            # Hourly for yesterday
+            # Hourly data for yesterday and recent history for day navigation.
             hourly_raw = await self.client.get_consumption(
                 yesterday, yesterday, "THIRTY_MIN_INTERVAL"
             )
             self._hourly_yesterday = aggregate_to_hourly(hourly_raw)
+
+            hourly_history_start = today - timedelta(days=30)
+            hourly_history_raw = await self.client.get_consumption(
+                hourly_history_start, yesterday, "THIRTY_MIN_INTERVAL"
+            )
+            self._hourly_history = aggregate_to_hourly(hourly_history_raw)
 
             # Aggregations
             monthly = aggregate_to_monthly(daily)
@@ -161,6 +168,7 @@ class OctopusAnalyticsCoordinator(DataUpdateCoordinator):
                     yesterday_energy_cost + yesterday_standing_cost, 2
                 ),
                 "hourly_yesterday": self._hourly_yesterday,
+                "hourly_history": self._hourly_history,
                 "last_30_days": last_30,
                 "daily_history": daily_history,
                 "monthly": monthly,

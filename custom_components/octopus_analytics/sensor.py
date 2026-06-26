@@ -150,6 +150,7 @@ SENSOR_DESCRIPTIONS: list[OctopusSensorEntityDescription] = [
             "energy_cost_eur": d.get("yesterday_energy_cost"),
             "standing_cost_eur": d.get("yesterday_standing_cost"),
             "hourly": d["hourly_yesterday"],
+            "hourly_history": d.get("hourly_history", d["hourly_yesterday"]),
         },
     ),
     OctopusSensorEntityDescription(
@@ -195,7 +196,10 @@ SENSOR_DESCRIPTIONS: list[OctopusSensorEntityDescription] = [
         name="Letzte 30 Tage JSON",
         icon="mdi:chart-bar",
         value_fn=lambda d: len(d["last_30_days"]),
-        attr_fn=lambda d: {"data": d["last_30_days"]},
+        attr_fn=lambda d: {
+            "data": d["last_30_days"],
+            "history": d.get("daily_history", d["last_30_days"]),
+        },
     ),
     OctopusSensorEntityDescription(
         key="daily_history",
