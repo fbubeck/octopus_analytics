@@ -122,6 +122,10 @@ class OctopusAnalyticsApiClient:
                             product {
                                 code
                             }
+                            netMonthlyStandingCharge
+                            standingChargeGrossRateInformation {
+                                grossRate
+                            }
                             unitRateInformation {
                                 ... on SimpleProductUnitRateInformation {
                                     latestGrossUnitRateCentsPerKwh
@@ -155,6 +159,10 @@ class OctopusAnalyticsApiClient:
         unit_rate_info = agreement.get("unitRateInformation") or {}
         rates = unit_rate_info.get("rates") or []
         product = agreement.get("product") or {}
+        standing_charge_info = agreement.get("standingChargeGrossRateInformation") or []
+        standing_charge = (
+            standing_charge_info[0].get("grossRate") if standing_charge_info else None
+        )
 
         return {
             "serial_number": meter.get("number"),
@@ -162,7 +170,8 @@ class OctopusAnalyticsApiClient:
             "mpan": malo.get("maloNumber"),
             "unit_rate": unit_rate_info.get("latestGrossUnitRateCentsPerKwh")
             or (rates[0].get("latestGrossUnitRateCentsPerKwh") if rates else None),
-            "standing_charge": None,
+            "standing_charge": standing_charge,
+            "net_monthly_standing_charge": agreement.get("netMonthlyStandingCharge"),
             "product_code": product.get("code"),
         }
 

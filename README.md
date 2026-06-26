@@ -90,15 +90,18 @@ show_monthly: true
 | Entity | Beschreibung |
 |--------|-------------|
 | `sensor.octopus_analytics_ytd_verbrauch` | YTD kWh (mit Ø und Tage als Attribute) |
-| `sensor.octopus_analytics_ytd_kosten` | YTD Kosten in € |
+| `sensor.octopus_analytics_ytd_kosten` | Geschätzte YTD Gesamtkosten in € (Verbrauch + Grundpreis) |
+| `sensor.octopus_analytics_ytd_verbrauchskosten` | YTD Verbrauchskosten in € |
+| `sensor.octopus_analytics_ytd_grundpreis` | YTD Grundpreis in € |
 | `sensor.octopus_analytics_monatsverbrauch` | Aktueller Monat kWh (mit Peak, Low, Ø) |
-| `sensor.octopus_analytics_monatskosten` | Aktuelle Monatskosten € |
+| `sensor.octopus_analytics_monatskosten` | Geschätzte aktuelle Monatskosten € |
 | `sensor.octopus_analytics_vormonat_verbrauch` | Vormonat kWh |
 | `sensor.octopus_analytics_vormonat_kosten` | Vormonat Kosten € |
 | `sensor.octopus_analytics_verbrauch_gestern` | Gestern kWh (mit stündlichen Daten als Attribut) |
 | `sensor.octopus_analytics_kosten_gestern` | Gestern Kosten € |
 | `sensor.octopus_analytics_kontostand` | Kontostand € |
 | `sensor.octopus_analytics_strompreis` | Aktueller Strompreis €/kWh |
+| `sensor.octopus_analytics_grundpreis_pro_tag` | Grundpreis €/Tag |
 | `sensor.octopus_analytics_letzte_30_tage_json` | 30-Tage Daten als JSON-Attribut |
 | `sensor.octopus_analytics_monatszusammenfassung_json` | Alle Monate als JSON-Attribut |
 

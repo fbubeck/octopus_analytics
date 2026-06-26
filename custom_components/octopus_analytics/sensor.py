@@ -48,12 +48,36 @@ SENSOR_DESCRIPTIONS: list[OctopusSensorEntityDescription] = [
     ),
     OctopusSensorEntityDescription(
         key="ytd_cost",
-        name="YTD Kosten",
+        name="YTD Gesamtkosten geschätzt",
         icon="mdi:currency-eur",
         native_unit_of_measurement="EUR",
         device_class=SensorDeviceClass.MONETARY,
         state_class=SensorStateClass.TOTAL,
         value_fn=lambda d: d["ytd_cost"],
+        attr_fn=lambda d: {
+            "energy_cost_eur": d.get("ytd_energy_cost"),
+            "standing_cost_eur": d.get("ytd_standing_cost"),
+            "standing_charge_eur_per_day": d.get("standing_charge"),
+            "note": "Geschätzt: Arbeitspreis + Grundpreis, ohne Zahlungen/Gutschriften.",
+        },
+    ),
+    OctopusSensorEntityDescription(
+        key="ytd_energy_cost",
+        name="YTD Verbrauchskosten",
+        icon="mdi:currency-eur",
+        native_unit_of_measurement="EUR",
+        device_class=SensorDeviceClass.MONETARY,
+        state_class=SensorStateClass.TOTAL,
+        value_fn=lambda d: d["ytd_energy_cost"],
+    ),
+    OctopusSensorEntityDescription(
+        key="ytd_standing_cost",
+        name="YTD Grundpreis",
+        icon="mdi:calendar-currency",
+        native_unit_of_measurement="EUR",
+        device_class=SensorDeviceClass.MONETARY,
+        state_class=SensorStateClass.TOTAL,
+        value_fn=lambda d: d["ytd_standing_cost"],
     ),
     OctopusSensorEntityDescription(
         key="month_kwh",
@@ -74,12 +98,16 @@ SENSOR_DESCRIPTIONS: list[OctopusSensorEntityDescription] = [
     ),
     OctopusSensorEntityDescription(
         key="month_cost",
-        name="Monatskosten",
+        name="Monatskosten geschätzt",
         icon="mdi:currency-eur",
         native_unit_of_measurement="EUR",
         device_class=SensorDeviceClass.MONETARY,
         state_class=SensorStateClass.TOTAL,
         value_fn=lambda d: d["current_month_cost"],
+        attr_fn=lambda d: {
+            "energy_cost_eur": d.get("current_month_energy_cost"),
+            "standing_cost_eur": d.get("current_month_standing_cost"),
+        },
     ),
     OctopusSensorEntityDescription(
         key="prev_month_kwh",
@@ -98,12 +126,16 @@ SENSOR_DESCRIPTIONS: list[OctopusSensorEntityDescription] = [
     ),
     OctopusSensorEntityDescription(
         key="prev_month_cost",
-        name="Vormonat Kosten",
+        name="Vormonat Kosten geschätzt",
         icon="mdi:currency-eur",
         native_unit_of_measurement="EUR",
         device_class=SensorDeviceClass.MONETARY,
         state_class=SensorStateClass.TOTAL,
         value_fn=lambda d: d["prev_month_cost"],
+        attr_fn=lambda d: {
+            "energy_cost_eur": d.get("prev_month_energy_cost"),
+            "standing_cost_eur": d.get("prev_month_standing_cost"),
+        },
     ),
     OctopusSensorEntityDescription(
         key="yesterday_kwh",
@@ -115,17 +147,23 @@ SENSOR_DESCRIPTIONS: list[OctopusSensorEntityDescription] = [
         value_fn=lambda d: d["yesterday_kwh"],
         attr_fn=lambda d: {
             "cost_eur": d["yesterday_cost"],
+            "energy_cost_eur": d.get("yesterday_energy_cost"),
+            "standing_cost_eur": d.get("yesterday_standing_cost"),
             "hourly": d["hourly_yesterday"],
         },
     ),
     OctopusSensorEntityDescription(
         key="yesterday_cost",
-        name="Kosten Gestern",
+        name="Kosten Gestern geschätzt",
         icon="mdi:currency-eur",
         native_unit_of_measurement="EUR",
         device_class=SensorDeviceClass.MONETARY,
         state_class=SensorStateClass.MEASUREMENT,
         value_fn=lambda d: d["yesterday_cost"],
+        attr_fn=lambda d: {
+            "energy_cost_eur": d.get("yesterday_energy_cost"),
+            "standing_cost_eur": d.get("yesterday_standing_cost"),
+        },
     ),
     OctopusSensorEntityDescription(
         key="balance",
@@ -143,6 +181,14 @@ SENSOR_DESCRIPTIONS: list[OctopusSensorEntityDescription] = [
         native_unit_of_measurement="EUR/kWh",
         state_class=SensorStateClass.MEASUREMENT,
         value_fn=lambda d: d["unit_rate"],
+    ),
+    OctopusSensorEntityDescription(
+        key="standing_charge",
+        name="Grundpreis pro Tag",
+        icon="mdi:calendar-currency",
+        native_unit_of_measurement="EUR/day",
+        state_class=SensorStateClass.MEASUREMENT,
+        value_fn=lambda d: d["standing_charge"],
     ),
     OctopusSensorEntityDescription(
         key="last_30_days",

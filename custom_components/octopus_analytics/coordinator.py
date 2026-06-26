@@ -105,24 +105,66 @@ class OctopusAnalyticsCoordinator(DataUpdateCoordinator):
             if not self._meter_info:
                 self._meter_info = await self.client.get_meter_info()
 
-            # Unit rate for cost calculations
+            # Cost calculations. Octopus returns rates in cents; the integration
+            # exposes EUR/kWh and EUR/day. Total costs are estimated from the
+            # available consumption days and do not include payments/credits.
             unit_rate = self._meter_info.get("unit_rate")
             unit_rate_eur = round(float(unit_rate) / 100, 6) if unit_rate else 0.271915
+            standing_charge = self._meter_info.get("standing_charge")
+            standing_charge_eur = (
+                round(float(standing_charge) / 100, 6) if standing_charge else 0.0
+            )
+
+            ytd_energy_cost = round(ytd["kwh"] * unit_rate_eur, 2)
+            ytd_standing_cost = round(ytd["days"] * standing_charge_eur, 2)
+            current_month_energy_cost = round(
+                current_month.get("total_kwh", 0) * unit_rate_eur, 2
+            )
+            current_month_standing_cost = round(
+                current_month.get("days", 0) * standing_charge_eur, 2
+            )
+            prev_month_energy_cost = round(
+                prev_month.get("total_kwh", 0) * unit_rate_eur, 2
+            )
+            prev_month_standing_cost = round(
+                prev_month.get("days", 0) * standing_charge_eur, 2
+            )
+            yesterday_energy_cost = round(
+                (yesterday_data["kwh"] if yesterday_data else 0) * unit_rate_eur, 2
+            )
+            yesterday_standing_cost = round(
+                standing_charge_eur if yesterday_data else 0.0, 2
+            )
 
             return {
                 "ytd": ytd,
-                "ytd_cost": round(ytd["kwh"] * unit_rate_eur, 2),
+                "ytd_energy_cost": ytd_energy_cost,
+                "ytd_standing_cost": ytd_standing_cost,
+                "ytd_cost": round(ytd_energy_cost + ytd_standing_cost, 2),
                 "current_month": current_month,
-                "current_month_cost": round(current_month.get("total_kwh", 0) * unit_rate_eur, 2),
+                "current_month_energy_cost": current_month_energy_cost,
+                "current_month_standing_cost": current_month_standing_cost,
+                "current_month_cost": round(
+                    current_month_energy_cost + current_month_standing_cost, 2
+                ),
                 "prev_month": prev_month,
-                "prev_month_cost": round(prev_month.get("total_kwh", 0) * unit_rate_eur, 2),
+                "prev_month_energy_cost": prev_month_energy_cost,
+                "prev_month_standing_cost": prev_month_standing_cost,
+                "prev_month_cost": round(
+                    prev_month_energy_cost + prev_month_standing_cost, 2
+                ),
                 "yesterday_kwh": yesterday_data["kwh"] if yesterday_data else 0.0,
-                "yesterday_cost": round((yesterday_data["kwh"] if yesterday_data else 0) * unit_rate_eur, 2),
+                "yesterday_energy_cost": yesterday_energy_cost,
+                "yesterday_standing_cost": yesterday_standing_cost,
+                "yesterday_cost": round(
+                    yesterday_energy_cost + yesterday_standing_cost, 2
+                ),
                 "hourly_yesterday": self._hourly_yesterday,
                 "last_30_days": last_30,
                 "monthly": monthly,
                 "balance": balance,
                 "unit_rate": unit_rate_eur,
+                "standing_charge": standing_charge_eur,
                 "meter_info": self._meter_info,
                 "updated": date.today().isoformat(),
             }
