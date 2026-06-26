@@ -239,12 +239,11 @@ class OctopusAnalyticsCard extends HTMLElement {
     ).join("")}</div>`;
   }
 
-  _renderForecast(last30) {
+  _renderPaymentPlanning(last30) {
     const monthKwh = parseFloat(this._getState("sensor.octopus_analytics_monatsverbrauch"));
     const monthCost = parseFloat(this._getState("sensor.octopus_analytics_monatskosten"));
     const monthDays = parseFloat(this._getAttr("sensor.octopus_analytics_monatsverbrauch", "days"));
     const daysInMonth = this._daysInCurrentMonth();
-    const remaining = Math.max(0, daysInMonth - (monthDays || 0));
     const avgKwh = monthDays > 0 ? monthKwh / monthDays : this._avg((last30 || []).map((d) => d.kwh));
     const avgCost = monthDays > 0 ? monthCost / monthDays : 0;
     const projectedKwh = avgKwh * daysInMonth;
@@ -257,9 +256,6 @@ class OctopusAnalyticsCard extends HTMLElement {
       : standingChargeSensor;
     const projectedEnergyCost = !isNaN(unitRate) ? projectedKwh * unitRate : null;
     const projectedStandingCost = !isNaN(standingCharge) ? standingCharge * daysInMonth : null;
-    const costBreakdown = projectedEnergyCost !== null && projectedStandingCost !== null
-      ? `AP ${this._formatEur(projectedEnergyCost)} + GP ${this._formatEur(projectedStandingCost)}`
-      : `Ist ${this._formatEur(monthCost)}`;
     const paymentSource = this._config.monthly_payment_eur ?? this._config.monthly_budget_eur;
     const payment = parseFloat(paymentSource);
     const paymentDelta = !isNaN(payment) ? payment - projectedCost : null;
@@ -292,6 +288,57 @@ class OctopusAnalyticsCard extends HTMLElement {
         </div>
       </div>
       <div class="mini-note">Grün = Abschlag reicht · Rot = Nachzahlung</div>`;
+  }
+
+  _renderForecast(last30, monthly) {
+    const ytdKwh = parseFloat(this._getState("sensor.octopus_analytics_ytd_verbrauch"));
+    const ytdCost = parseFloat(this._getState("sensor.octopus_analytics_ytd_kosten"));
+    const ytdDays = parseFloat(this._getAttr("sensor.octopus_analytics_ytd_verbrauch", "days"));
+    const avgKwhDay = ytdDays > 0 ? ytdKwh / ytdDays : this._avg((last30 || []).map((d) => d.kwh));
+    const avgCostDay = ytdDays > 0 && !isNaN(ytdCost) ? ytdCost / ytdDays : 0;
+    const now = new Date();
+    const year = now.getFullYear();
+    const start = new Date(year, 0, 1);
+    const end = new Date(year, 11, 31);
+    const dayOfYear = Math.floor((now - start) / 86400000) + 1;
+    const daysInYear = Math.floor((end - start) / 86400000) + 1;
+    const remainingDays = Math.max(0, daysInYear - dayOfYear);
+    const projectedYearKwh = ytdKwh + avgKwhDay * remainingDays;
+    const projectedYearCost = ytdCost + avgCostDay * remainingDays;
+
+    const months = [];
+    for (let month = 1; month <= 12; month++) {
+      const key = `${year}-${String(month).padStart(2, "0")}`;
+      const actual = monthly?.[key]?.total_kwh || 0;
+      const dim = new Date(year, month, 0).getDate();
+      const isFuture = month > now.getMonth() + 1;
+      const isCurrent = month === now.getMonth() + 1;
+      const projected = isFuture ? avgKwhDay * dim : isCurrent && actual > 0 ? (actual / now.getDate()) * dim : actual;
+      months.push({ key, label: this._monthLabel(key), value: actual || projected, actual, projected, estimated: isFuture || isCurrent });
+    }
+    const maxVal = Math.max(...months.map((m) => m.value || 0), 0.001);
+    const points = months.map((m, i) => `${(i / 11) * 100},${100 - ((m.value || 0) / maxVal) * 88}`).join(" ");
+    const bars = months.map((m) => {
+      const pct = m.value > 0 ? Math.max(3, (m.value / maxVal) * 100) : 0;
+      const tooltip = `${m.label}: ${m.actual ? "Ist" : "Prognose"} ${(m.value || 0).toFixed(1)} kWh`;
+      return `<div class="month-bar-wrap has-tooltip" data-tooltip="${this._tooltip(tooltip)}">
+        <div class="bar month-bar ${m.estimated ? "estimated" : ""}" style="height:${pct}%"></div>
+      </div>`;
+    }).join("");
+
+    return `
+      <div class="science-grid">
+        <div class="science-card"><span>Jahresende kWh</span><b>${this._formatKwh(projectedYearKwh)}</b><em>Ø ${avgKwhDay.toFixed(2)} kWh/Tag</em></div>
+        <div class="science-card"><span>Jahresende Kosten</span><b>${this._formatEur(projectedYearCost)}</b><em>Ø ${this._formatEur(avgCostDay)}/Tag</em></div>
+        <div class="science-card"><span>Restjahr</span><b>${remainingDays} Tage</b><em>${this._formatKwh(avgKwhDay * remainingDays)}</em></div>
+      </div>
+      <div class="chart-header"><span class="chart-title">Trendprojektion ${year}</span><span class="chart-total">Ist + Prognose</span></div>
+      <div class="trend-chart">
+        <svg viewBox="0 0 100 100" preserveAspectRatio="none"><polyline points="${points}" /></svg>
+        <div class="bars month-bars">${bars}</div>
+      </div>
+      <div class="x-labels month-labels">${months.map((m) => `<span>${m.label}</span>`).join("")}</div>
+      <div class="mini-note">Transparente Balken = Prognose · Linie = Monats-Trend</div>`;
   }
 
   _renderTrafficAndAnomalies(last30) {
@@ -350,7 +397,7 @@ class OctopusAnalyticsCard extends HTMLElement {
   _renderActiveTab(hourlyData, last30, monthly) {
     switch (this._activeTab) {
       case "forecast":
-        return `${this._renderForecast(last30)}<div class="divider"></div>${this._renderTrafficAndAnomalies(last30)}`;
+        return `${this._renderForecast(last30, monthly)}<div class="divider"></div>${this._renderTrafficAndAnomalies(last30)}`;
       case "heatmap":
         return `${this._renderHeatmap(last30)}`;
       case "charts":
@@ -360,7 +407,7 @@ class OctopusAnalyticsCard extends HTMLElement {
       case "overview":
       default:
         return `${this._config.show_kpis ? this._renderKPIs(last30) : ""}
-          ${this._renderForecast(last30)}
+          ${this._renderPaymentPlanning(last30)}
           <div class="divider"></div>
           ${this._config.show_monthly ? `<div class="chart-section">${this._renderDailyChart(last30)}</div>` : ""}`;
     }
@@ -389,16 +436,10 @@ class OctopusAnalyticsCard extends HTMLElement {
 
     const yesterdayN = parseFloat(yesterday);
     const avg30 = this._avg((last30 || []).map((d) => d.kwh));
-    const target = parseFloat(this._config.daily_target_kwh) || avg30;
     const diffAvgPct = avg30 > 0 ? ((yesterdayN - avg30) / avg30) * 100 : 0;
-    const diffTargetPct = target > 0 ? ((yesterdayN - target) / target) * 100 : 0;
     const avgStatus = this._statusClass(diffAvgPct);
-    const targetStatus = this._statusClass(diffTargetPct);
-    const trafficBadges = !isNaN(yesterdayN) && avg30 > 0
-      ? `<div class="kpi-badges">
-          <span class="mini-traffic ${avgStatus}">Ø30 ${diffAvgPct > 0 ? "+" : ""}${diffAvgPct.toFixed(0)}%</span>
-          <span class="mini-traffic ${targetStatus}">Ziel ${diffTargetPct > 0 ? "+" : ""}${diffTargetPct.toFixed(0)}%</span>
-        </div>`
+    const yesterdayTrend = !isNaN(yesterdayN) && avg30 > 0
+      ? `<span class="trend-chip ${avgStatus}">${diffAvgPct > 0 ? "↑" : "↓"} ${Math.abs(diffAvgPct).toFixed(0)}% vs Ø30</span>`
       : "";
 
     // Month-over-month delta
@@ -408,7 +449,7 @@ class OctopusAnalyticsCard extends HTMLElement {
       ? Math.round(((monthN - prevN) / prevN) * 100)
       : null;
     const deltaStr = delta !== null
-      ? `<span class="delta ${delta <= 0 ? "good" : "bad"}">${delta > 0 ? "+" : ""}${delta}% ggü. Vormonat</span>`
+      ? `<span class="trend-chip ${delta <= 0 ? "good" : "bad"}">${delta > 0 ? "↑" : "↓"} ${Math.abs(delta)}% vs VM</span>`
       : "";
 
     const peakStr = monthPeakDate
@@ -421,8 +462,7 @@ class OctopusAnalyticsCard extends HTMLElement {
         <div class="kpi-card accent-blue">
           <div class="kpi-label">GESTERN</div>
           <div class="kpi-value">${this._formatKwh(yesterday)}</div>
-          <div class="kpi-sub">${this._formatEur(yesterdayCost)}</div>
-          ${trafficBadges}
+          <div class="kpi-sub">${this._formatEur(yesterdayCost)} ${yesterdayTrend}</div>
         </div>
         <div class="kpi-card accent-teal">
           <div class="kpi-label">DIESER MONAT</div>
@@ -754,6 +794,38 @@ class OctopusAnalyticsCard extends HTMLElement {
       .money-chip.good b { color: rgba(110,245,145,0.98); }
       .money-chip.bad { background: rgba(255,100,80,0.14); border-color: rgba(255,100,80,0.35); }
       .money-chip.bad b { color: rgba(255,135,115,0.98); }
+      .science-grid {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 8px;
+        margin-bottom: 12px;
+      }
+      .science-card {
+        background: rgba(255,255,255,0.055);
+        border: 1px solid rgba(255,255,255,0.08);
+        border-radius: 12px;
+        padding: 10px;
+      }
+      .science-card span { display:block; font-size:9px; color:rgba(255,255,255,0.42); text-transform:uppercase; font-weight:800; margin-bottom:4px; }
+      .science-card b { display:block; font-size:15px; color:rgba(255,255,255,0.95); }
+      .science-card em { display:block; font-style:normal; font-size:10px; color:rgba(255,255,255,0.45); margin-top:2px; }
+      .trend-chart { position: relative; height: 110px; }
+      .trend-chart svg { position:absolute; inset:0; width:100%; height:100%; pointer-events:none; z-index:2; }
+      .trend-chart polyline { fill:none; stroke:rgba(255,220,90,0.95); stroke-width:2.2; vector-effect:non-scaling-stroke; filter: drop-shadow(0 0 5px rgba(255,220,90,0.35)); }
+      .trend-chart .bars { height:100%; position:relative; z-index:1; }
+      .month-bar.estimated { opacity:0.36; border:1px dashed rgba(255,255,255,0.25); }
+      .trend-chip {
+        display:inline-block;
+        margin-left:4px;
+        border-radius:999px;
+        padding:2px 5px;
+        font-size:9px;
+        font-weight:800;
+        white-space:nowrap;
+      }
+      .trend-chip.good { background:rgba(80,220,120,0.16); color:rgba(80,220,120,0.95); }
+      .trend-chip.warn { background:rgba(255,205,80,0.16); color:rgba(255,205,80,0.95); }
+      .trend-chip.bad { background:rgba(255,100,80,0.16); color:rgba(255,100,80,0.95); }
       .mini-note {
         font-size: 10px;
         color: rgba(255,255,255,0.42);
