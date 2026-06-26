@@ -7,6 +7,7 @@ class OctopusAnalyticsCard extends HTMLElement {
   constructor() {
     super();
     this.attachShadow({ mode: "open" });
+    this._activeTab = "overview";
   }
 
   setConfig(config) {
@@ -15,6 +16,10 @@ class OctopusAnalyticsCard extends HTMLElement {
       show_hourly: true,
       show_monthly: true,
       show_kpis: true,
+      monthly_budget_eur: null,
+      monthly_payment_eur: null,
+      daily_target_kwh: null,
+      anomaly_threshold_percent: 30,
       ...config,
     };
   }
@@ -204,6 +209,143 @@ class OctopusAnalyticsCard extends HTMLElement {
       </div>`;
   }
 
+
+  _daysInCurrentMonth() {
+    const now = new Date();
+    return new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
+  }
+
+  _avg(values) {
+    const nums = values.map((v) => parseFloat(v)).filter((v) => !isNaN(v));
+    return nums.length ? nums.reduce((a, b) => a + b, 0) / nums.length : 0;
+  }
+
+  _statusClass(percent) {
+    if (percent <= -10) return "good";
+    if (percent <= 15) return "warn";
+    return "bad";
+  }
+
+  _renderTabs() {
+    const tabs = [
+      ["overview", "Übersicht"],
+      ["forecast", "Prognose"],
+      ["heatmap", "Heatmap"],
+      ["charts", "Charts"],
+    ];
+    return `<div class="tabs">${tabs.map(([id, label]) =>
+      `<button class="tab ${this._activeTab === id ? "active" : ""}" data-tab="${id}">${label}</button>`
+    ).join("")}</div>`;
+  }
+
+  _renderForecast(last30) {
+    const monthKwh = parseFloat(this._getState("sensor.octopus_analytics_monatsverbrauch"));
+    const monthCost = parseFloat(this._getState("sensor.octopus_analytics_monatskosten"));
+    const monthDays = parseFloat(this._getAttr("sensor.octopus_analytics_monatsverbrauch", "days"));
+    const daysInMonth = this._daysInCurrentMonth();
+    const remaining = Math.max(0, daysInMonth - (monthDays || 0));
+    const avgKwh = monthDays > 0 ? monthKwh / monthDays : this._avg((last30 || []).map((d) => d.kwh));
+    const avgCost = monthDays > 0 ? monthCost / monthDays : 0;
+    const projectedKwh = avgKwh * daysInMonth;
+    const projectedCost = avgCost * daysInMonth;
+    const budget = parseFloat(this._config.monthly_budget_eur);
+    const payment = parseFloat(this._config.monthly_payment_eur);
+    const budgetDelta = !isNaN(budget) ? budget - projectedCost : null;
+    const paymentDelta = !isNaN(payment) ? payment - projectedCost : null;
+
+    return `
+      <div class="forecast-grid">
+        <div class="forecast-card accent-blue">
+          <div class="kpi-label">PROGNOSE MONATSENDE</div>
+          <div class="kpi-value">${this._formatKwh(projectedKwh)}</div>
+          <div class="kpi-sub">${this._formatEur(projectedCost)} · noch ${remaining} Tage</div>
+        </div>
+        <div class="forecast-card ${budgetDelta === null ? "" : budgetDelta >= 0 ? "accent-teal" : "accent-red"}">
+          <div class="kpi-label">BUDGET</div>
+          <div class="kpi-value">${budgetDelta === null ? "nicht gesetzt" : this._formatEur(budgetDelta)}</div>
+          <div class="kpi-sub">${budgetDelta === null ? "YAML: monthly_budget_eur setzen" : budgetDelta >= 0 ? "voraussichtlich unter Budget" : "voraussichtlich über Budget"}</div>
+        </div>
+        <div class="forecast-card ${paymentDelta === null ? "" : paymentDelta >= 0 ? "accent-teal" : "accent-red"}">
+          <div class="kpi-label">ABSCHLAG</div>
+          <div class="kpi-value">${paymentDelta === null ? "nicht gesetzt" : this._formatEur(paymentDelta)}</div>
+          <div class="kpi-sub">${paymentDelta === null ? "YAML: monthly_payment_eur setzen" : paymentDelta >= 0 ? "Abschlag deckt Prognose" : "Abschlag zu niedrig"}</div>
+        </div>
+      </div>
+      <div class="mini-note">Basis: aktueller Monatsschnitt ${avgKwh.toFixed(2)} kWh/Tag und aktuelle geschätzte Kosten.</div>`;
+  }
+
+  _renderTrafficAndAnomalies(last30) {
+    const yesterday = parseFloat(this._getState("sensor.octopus_analytics_verbrauch_gestern"));
+    const avg30 = this._avg((last30 || []).map((d) => d.kwh));
+    const target = parseFloat(this._config.daily_target_kwh) || avg30;
+    const diffAvgPct = avg30 > 0 ? ((yesterday - avg30) / avg30) * 100 : 0;
+    const diffTargetPct = target > 0 ? ((yesterday - target) / target) * 100 : 0;
+    const threshold = parseFloat(this._config.anomaly_threshold_percent) || 30;
+    const anomalies = (last30 || [])
+      .filter((d) => avg30 > 0 && Math.abs(((d.kwh || 0) - avg30) / avg30 * 100) >= threshold)
+      .slice(-6)
+      .reverse();
+
+    return `
+      <div class="traffic-row">
+        <div class="traffic ${this._statusClass(diffAvgPct)}"><span></span><b>Gestern vs. Ø30</b><em>${diffAvgPct > 0 ? "+" : ""}${diffAvgPct.toFixed(0)}%</em></div>
+        <div class="traffic ${this._statusClass(diffTargetPct)}"><span></span><b>Gestern vs. Ziel</b><em>${diffTargetPct > 0 ? "+" : ""}${diffTargetPct.toFixed(0)}%</em></div>
+      </div>
+      <div class="anomaly-box">
+        <div class="chart-title">Anomalien letzte 30 Tage</div>
+        ${anomalies.length ? anomalies.map((d) => {
+          const pct = ((d.kwh - avg30) / avg30) * 100;
+          return `<div class="anomaly-item ${pct > 0 ? "bad" : "good"}">
+            <span>${this._formatDateDE(d.date)}</span><b>${this._formatKwh(d.kwh)}</b><em>${pct > 0 ? "+" : ""}${pct.toFixed(0)}%</em>
+          </div>`;
+        }).join("") : `<div class="no-data">Keine Auffälligkeiten über ${threshold}% gefunden.</div>`}
+      </div>`;
+  }
+
+  _renderHeatmap(last30) {
+    const now = new Date();
+    const year = now.getFullYear();
+    const month = now.getMonth();
+    const days = new Date(year, month + 1, 0).getDate();
+    const firstWeekday = (new Date(year, month, 1).getDay() + 6) % 7; // Monday=0
+    const byDate = Object.fromEntries((last30 || []).map((d) => [d.date, d]));
+    const monthPrefix = `${year}-${String(month + 1).padStart(2, "0")}`;
+    const vals = Object.values(byDate).filter((d) => d.date?.startsWith(monthPrefix)).map((d) => d.kwh || 0);
+    const maxVal = Math.max(...vals, 0.001);
+    const cells = [];
+    for (let i = 0; i < firstWeekday; i++) cells.push(`<div class="heat-cell empty"></div>`);
+    for (let d = 1; d <= days; d++) {
+      const key = `${monthPrefix}-${String(d).padStart(2, "0")}`;
+      const val = byDate[key]?.kwh || 0;
+      const intensity = val / maxVal;
+      const alpha = val ? 0.18 + intensity * 0.72 : 0.04;
+      cells.push(`<div class="heat-cell has-tooltip" data-tooltip="${this._tooltip(`${this._formatDateDE(key)} · ${val ? val.toFixed(3) + " kWh" : "keine Daten"}`)}" style="background:rgba(80,200,255,${alpha})"><span>${d}</span></div>`);
+    }
+    return `
+      <div class="chart-header"><span class="chart-title">Heatmap Kalender – ${this._monthLabel(monthPrefix)} ${year}</span><span class="chart-total">max ${maxVal.toFixed(2)} kWh</span></div>
+      <div class="weekdays"><span>Mo</span><span>Di</span><span>Mi</span><span>Do</span><span>Fr</span><span>Sa</span><span>So</span></div>
+      <div class="heatmap">${cells.join("")}</div>`;
+  }
+
+  _renderActiveTab(hourlyData, last30, monthly) {
+    switch (this._activeTab) {
+      case "forecast":
+        return `${this._renderForecast(last30)}<div class="divider"></div>${this._renderTrafficAndAnomalies(last30)}`;
+      case "heatmap":
+        return `${this._renderHeatmap(last30)}<div class="divider"></div>${this._renderTrafficAndAnomalies(last30)}`;
+      case "charts":
+        return `${this._config.show_hourly ? `<div class="chart-section">${this._renderHourlyChart(hourlyData)}</div>` : ""}
+          ${this._config.show_hourly && this._config.show_monthly ? '<div class="divider"></div>' : ""}
+          ${this._config.show_monthly ? `<div class="chart-section">${this._renderDailyChart(last30)}</div><div class="divider"></div><div class="chart-section">${this._renderYearChart(monthly)}</div>` : ""}`;
+      case "overview":
+      default:
+        return `${this._config.show_kpis ? this._renderKPIs() : ""}
+          ${this._renderForecast(last30)}
+          <div class="divider"></div>
+          ${this._renderTrafficAndAnomalies(last30)}`;
+    }
+  }
+
   _renderKPIs() {
     const ytdKwh = this._getState("sensor.octopus_analytics_ytd_verbrauch");
     const ytdCost = this._getState("sensor.octopus_analytics_ytd_kosten");
@@ -309,6 +451,30 @@ class OctopusAnalyticsCard extends HTMLElement {
         text-transform: uppercase;
         letter-spacing: 0.6px;
         margin-bottom: 14px;
+      }
+      .tabs {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 6px;
+        margin-bottom: 12px;
+        background: rgba(255,255,255,0.04);
+        padding: 4px;
+        border-radius: 12px;
+      }
+      .tab {
+        border: 0;
+        border-radius: 9px;
+        padding: 7px 4px;
+        background: transparent;
+        color: rgba(255,255,255,0.55);
+        font-size: 11px;
+        font-weight: 700;
+        cursor: pointer;
+      }
+      .tab.active {
+        background: linear-gradient(135deg, rgba(80,200,255,0.25), rgba(160,100,255,0.22));
+        color: rgba(255,255,255,0.95);
+        box-shadow: inset 0 0 0 1px rgba(255,255,255,0.08);
       }
       /* KPI Cards */
       .kpi-row {
@@ -480,6 +646,86 @@ class OctopusAnalyticsCard extends HTMLElement {
         text-align: center;
         font-size: 9px;
       }
+      .forecast-grid {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 8px;
+        margin-bottom: 8px;
+      }
+      .forecast-card {
+        background: rgba(255,255,255,0.06);
+        border-radius: 12px;
+        padding: 10px;
+        border: 1px solid rgba(255,255,255,0.08);
+      }
+      .accent-red { border-color: rgba(255,100,80,0.35); }
+      .mini-note {
+        font-size: 10px;
+        color: rgba(255,255,255,0.42);
+        margin: 6px 2px 12px;
+      }
+      .traffic-row {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 8px;
+        margin-bottom: 10px;
+      }
+      .traffic {
+        display: grid;
+        grid-template-columns: 14px 1fr auto;
+        align-items: center;
+        gap: 7px;
+        background: rgba(255,255,255,0.05);
+        border-radius: 12px;
+        padding: 9px;
+        font-size: 11px;
+      }
+      .traffic span { width: 10px; height: 10px; border-radius: 50%; background: currentColor; box-shadow: 0 0 12px currentColor; }
+      .traffic.good { color: rgba(80,220,120,0.95); }
+      .traffic.warn { color: rgba(255,205,80,0.95); }
+      .traffic.bad { color: rgba(255,100,80,0.95); }
+      .traffic b { color: rgba(255,255,255,0.7); font-weight: 600; }
+      .traffic em { font-style: normal; font-weight: 800; }
+      .anomaly-box {
+        background: rgba(255,255,255,0.035);
+        border-radius: 12px;
+        padding: 10px;
+      }
+      .anomaly-item {
+        display: grid;
+        grid-template-columns: 1fr auto auto;
+        gap: 8px;
+        align-items: center;
+        padding: 6px 0;
+        border-bottom: 1px solid rgba(255,255,255,0.06);
+        font-size: 11px;
+      }
+      .anomaly-item:last-child { border-bottom: 0; }
+      .anomaly-item.good em { color: rgba(80,220,120,0.95); }
+      .anomaly-item.bad em { color: rgba(255,100,80,0.95); }
+      .weekdays, .heatmap {
+        display: grid;
+        grid-template-columns: repeat(7, 1fr);
+        gap: 5px;
+      }
+      .weekdays {
+        margin: 8px 0 5px;
+        font-size: 9px;
+        color: rgba(255,255,255,0.35);
+        text-align: center;
+      }
+      .heat-cell {
+        position: relative;
+        aspect-ratio: 1;
+        border-radius: 9px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        color: rgba(255,255,255,0.82);
+        font-size: 11px;
+        border: 1px solid rgba(255,255,255,0.06);
+      }
+      .heat-cell.empty { opacity: 0; }
       .divider {
         height: 1px;
         background: rgba(255,255,255,0.08);
@@ -504,13 +750,16 @@ class OctopusAnalyticsCard extends HTMLElement {
       <style>${this._styles()}</style>
       <ha-card>
         <div class="card-title">${this._config.title}</div>
-        ${this._config.show_kpis ? this._renderKPIs() : ""}
-        ${this._config.show_hourly ? `<div class="chart-section">${this._renderHourlyChart(hourlyData)}</div>` : ""}
-        ${this._config.show_hourly && this._config.show_monthly ? '<div class="divider"></div>' : ""}
-        ${this._config.show_monthly ? `<div class="chart-section">${this._renderDailyChart(last30)}</div>` : ""}
-        ${this._config.show_monthly ? '<div class="divider"></div>' : ""}
-        ${this._config.show_monthly ? `<div class="chart-section">${this._renderYearChart(monthly)}</div>` : ""}
+        ${this._renderTabs()}
+        ${this._renderActiveTab(hourlyData, last30, monthly)}
       </ha-card>`;
+
+    this.shadowRoot.querySelectorAll(".tab").forEach((button) => {
+      button.addEventListener("click", () => {
+        this._activeTab = button.dataset.tab;
+        this._render();
+      });
+    });
   }
 
   getCardSize() {

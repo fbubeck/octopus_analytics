@@ -73,6 +73,10 @@ title: Octopus Energy Analytics
 show_kpis: true
 show_hourly: true
 show_monthly: true
+monthly_budget_eur: 180      # optional: Monatsbudget
+monthly_payment_eur: 160     # optional: monatlicher Abschlag
+daily_target_kwh: 5          # optional: Tagesziel für Ampel
+anomaly_threshold_percent: 30 # optional: Schwelle für Anomalien
 ```
 
 ## Verfügbare Sensoren
