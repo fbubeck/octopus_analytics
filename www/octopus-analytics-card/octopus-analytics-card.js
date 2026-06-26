@@ -8,7 +8,7 @@ class OctopusAnalyticsCard extends HTMLElement {
     super();
     this.attachShadow({ mode: "open" });
     this._activeTab = "overview";
-    this._dailyPage = 0;
+    this._dailyMonthOffset = 0;
     this._monthYearOffset = 0;
   }
 
@@ -129,22 +129,31 @@ class OctopusAnalyticsCard extends HTMLElement {
   }
 
   _sliceDailyWindow(dailyData) {
-    const data = [...(dailyData || [])].sort((a, b) => String(a.date).localeCompare(String(b.date)));
-    const pageSize = 30;
-    const maxPage = Math.max(0, Math.ceil(data.length / pageSize) - 1);
-    this._dailyPage = Math.min(Math.max(this._dailyPage || 0, 0), maxPage);
-    const end = data.length - this._dailyPage * pageSize;
-    const start = Math.max(0, end - pageSize);
-    return { window: data.slice(start, end), maxPage };
+    const data = [...(dailyData || [])]
+      .filter((d) => d.date)
+      .sort((a, b) => String(a.date).localeCompare(String(b.date)));
+    const monthKeys = [...new Set(data.map((d) => d.date.substring(0, 7)))];
+    const maxOffset = Math.max(0, monthKeys.length - 1);
+    this._dailyMonthOffset = Math.min(
+      Math.max(this._dailyMonthOffset || 0, 0),
+      maxOffset
+    );
+    const selectedMonth = monthKeys[monthKeys.length - 1 - this._dailyMonthOffset];
+    return {
+      window: data.filter((d) => d.date.startsWith(selectedMonth)),
+      maxOffset,
+      selectedMonth,
+      monthCount: monthKeys.length,
+    };
   }
 
   _renderDailyChart(dailyData) {
-    const { window: last30, maxPage } = this._sliceDailyWindow(dailyData);
+    const { window: last30, maxOffset, selectedMonth, monthCount } = this._sliceDailyWindow(dailyData);
     if (!last30 || !last30.length) {
       return `<div class="no-data">Keine Tagesdaten verfügbar</div>`;
     }
 
-    const period = `${this._formatDateDE(last30[0]?.date)} – ${this._formatDateDE(last30[last30.length - 1]?.date)}`;
+    const period = selectedMonth ? `${this._monthLabel(selectedMonth)} ${selectedMonth.substring(0, 4)}` : `${this._formatDateDE(last30[0]?.date)} – ${this._formatDateDE(last30[last30.length - 1]?.date)}`;
     const values = last30.map((d) => d.kwh || 0);
     const maxVal = Math.max(...values, 0.001);
 
@@ -169,14 +178,14 @@ class OctopusAnalyticsCard extends HTMLElement {
         <span class="chart-total">${period} · max ${maxVal.toFixed(2)} kWh</span>
       </div>
       <div class="chart-nav">
-        <button class="chart-nav-btn" data-action="daily-prev" ${this._dailyPage >= maxPage ? "disabled" : ""} title="Ältere Tage anzeigen">‹ Zurück</button>
-        <button class="chart-nav-btn" data-action="daily-next" ${this._dailyPage <= 0 ? "disabled" : ""} title="Neuere Tage anzeigen">Vor ›</button>
+        <button class="chart-nav-btn" data-action="daily-prev" ${this._dailyMonthOffset >= maxOffset ? "disabled" : ""} title="Vorherigen Monat anzeigen">‹ Monat</button>
+        <button class="chart-nav-btn" data-action="daily-next" ${this._dailyMonthOffset <= 0 ? "disabled" : ""} title="Nächsten Monat anzeigen">Monat ›</button>
       </div>
-      ${maxPage === 0 ? `<div class="mini-note">Keine älteren Tagesdaten im Card-Cache. Nach Update Integration neu laden, damit Tageshistorie verfügbar ist.</div>` : ""}
+      ${monthCount <= 1 ? `<div class="mini-note">Monatsnavigation aktiv, sobald Tagesdaten aus mehreren Monaten vorhanden sind.</div>` : ""}
       <div class="chart-body">
         <div class="chart-area" style="margin-left:0">
           <div class="bars">${bars}</div>
-          <div class="x-labels dense-labels">
+          <div class="x-labels dense-labels" style="grid-template-columns: repeat(${last30.length}, 1fr)">
             ${last30.map((d, i) => i % 5 === 0 || i === last30.length - 1 ? `<span>${d.date?.substring(8, 10) || ""}</span>` : `<span></span>`).join("")}
           </div>
         </div>
@@ -997,8 +1006,8 @@ class OctopusAnalyticsCard extends HTMLElement {
     this.shadowRoot.querySelectorAll("[data-action]").forEach((button) => {
       button.addEventListener("click", () => {
         const action = button.dataset.action;
-        if (action === "daily-prev") this._dailyPage += 1;
-        if (action === "daily-next") this._dailyPage = Math.max(0, this._dailyPage - 1);
+        if (action === "daily-prev") this._dailyMonthOffset += 1;
+        if (action === "daily-next") this._dailyMonthOffset = Math.max(0, this._dailyMonthOffset - 1);
         if (action === "month-prev") this._monthYearOffset += 1;
         if (action === "month-next") this._monthYearOffset = Math.max(0, this._monthYearOffset - 1);
         this._render();
