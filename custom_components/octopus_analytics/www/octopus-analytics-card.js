@@ -229,9 +229,9 @@ class OctopusAnalyticsCard extends HTMLElement {
   _renderTabs() {
     const tabs = [
       ["overview", "Übersicht"],
+      ["charts", "Charts"],
       ["forecast", "Prognose"],
       ["heatmap", "Heatmap"],
-      ["charts", "Charts"],
     ];
     return `<div class="tabs">${tabs.map(([id, label]) =>
       `<button class="tab ${this._activeTab === id ? "active" : ""}" data-tab="${id}">${label}</button>`
@@ -262,13 +262,13 @@ class OctopusAnalyticsCard extends HTMLElement {
         </div>
         <div class="forecast-card ${budgetDelta === null ? "" : budgetDelta >= 0 ? "accent-teal" : "accent-red"}">
           <div class="kpi-label">BUDGET</div>
-          <div class="kpi-value">${budgetDelta === null ? "nicht gesetzt" : this._formatEur(budgetDelta)}</div>
-          <div class="kpi-sub">${budgetDelta === null ? "YAML: monthly_budget_eur setzen" : budgetDelta >= 0 ? "voraussichtlich unter Budget" : "voraussichtlich über Budget"}</div>
+          <div class="kpi-value">${budgetDelta === null ? "nicht gesetzt" : this._formatEur(budget)}</div>
+          <div class="kpi-sub">Prognose ${this._formatEur(projectedCost)} · ${budgetDelta === null ? "YAML: monthly_budget_eur setzen" : budgetDelta >= 0 ? this._formatEur(budgetDelta) + " Puffer" : this._formatEur(Math.abs(budgetDelta)) + " drüber"}</div>
         </div>
         <div class="forecast-card ${paymentDelta === null ? "" : paymentDelta >= 0 ? "accent-teal" : "accent-red"}">
           <div class="kpi-label">ABSCHLAG</div>
-          <div class="kpi-value">${paymentDelta === null ? "nicht gesetzt" : this._formatEur(paymentDelta)}</div>
-          <div class="kpi-sub">${paymentDelta === null ? "YAML: monthly_payment_eur setzen" : paymentDelta >= 0 ? "Abschlag deckt Prognose" : "Abschlag zu niedrig"}</div>
+          <div class="kpi-value">${paymentDelta === null ? "nicht gesetzt" : this._formatEur(payment)}</div>
+          <div class="kpi-sub">Prognose ${this._formatEur(projectedCost)} · ${paymentDelta === null ? "YAML: monthly_payment_eur setzen" : paymentDelta >= 0 ? this._formatEur(paymentDelta) + " Puffer" : this._formatEur(Math.abs(paymentDelta)) + " Nachzahlung"}</div>
         </div>
       </div>
       <div class="mini-note">Basis: aktueller Monatsschnitt ${avgKwh.toFixed(2)} kWh/Tag und aktuelle geschätzte Kosten.</div>`;
@@ -330,9 +330,9 @@ class OctopusAnalyticsCard extends HTMLElement {
   _renderActiveTab(hourlyData, last30, monthly) {
     switch (this._activeTab) {
       case "forecast":
-        return `${this._renderForecast(last30)}<div class="divider"></div>${this._renderTrafficAndAnomalies(last30)}`;
+        return `${this._renderForecast(last30)}`;
       case "heatmap":
-        return `${this._renderHeatmap(last30)}<div class="divider"></div>${this._renderTrafficAndAnomalies(last30)}`;
+        return `${this._renderHeatmap(last30)}`;
       case "charts":
         return `${this._config.show_hourly ? `<div class="chart-section">${this._renderHourlyChart(hourlyData)}</div>` : ""}
           ${this._config.show_hourly && this._config.show_monthly ? '<div class="divider"></div>' : ""}
