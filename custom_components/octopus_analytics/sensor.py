@@ -169,7 +169,7 @@ async def async_setup_entry(
     """Set up Octopus Analytics sensors."""
     coordinator: OctopusAnalyticsCoordinator = hass.data[DOMAIN][entry.entry_id]
     async_add_entities(
-        OctopusAnalyticsSensor(coordinator, description)
+        OctopusAnalyticsSensor(coordinator, entry, description)
         for description in SENSOR_DESCRIPTIONS
     )
 
@@ -183,13 +183,15 @@ class OctopusAnalyticsSensor(CoordinatorEntity[OctopusAnalyticsCoordinator], Sen
     def __init__(
         self,
         coordinator: OctopusAnalyticsCoordinator,
+        entry: ConfigEntry,
         description: OctopusSensorEntityDescription,
     ) -> None:
         super().__init__(coordinator)
         self.entity_description = description
-        self._attr_unique_id = f"{DOMAIN}_{description.key}"
+        account_id = entry.unique_id or entry.entry_id
+        self._attr_unique_id = f"{account_id}_{description.key}"
         self._attr_device_info = {
-            "identifiers": {(DOMAIN, DOMAIN)},
+            "identifiers": {(DOMAIN, account_id)},
             "name": "Octopus Analytics",
             "manufacturer": "Octopus Energy Germany",
             "model": "Analytics",

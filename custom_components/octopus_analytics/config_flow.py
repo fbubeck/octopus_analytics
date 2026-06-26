@@ -4,10 +4,11 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-import aiohttp
 import voluptuous as vol
 from homeassistant import config_entries
 from homeassistant.data_entry_flow import FlowResult
+from homeassistant.helpers import selector
+from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from .api import OctopusAnalyticsApiClient, OctopusAnalyticsAuthError
 from .const import CONF_EMAIL, CONF_PASSWORD, DOMAIN
@@ -16,8 +17,12 @@ _LOGGER = logging.getLogger(__name__)
 
 STEP_USER_DATA_SCHEMA = vol.Schema(
     {
-        vol.Required(CONF_EMAIL): str,
-        vol.Required(CONF_PASSWORD): str,
+        vol.Required(CONF_EMAIL): selector.TextSelector(
+            selector.TextSelectorConfig(type=selector.TextSelectorType.EMAIL)
+        ),
+        vol.Required(CONF_PASSWORD): selector.TextSelector(
+            selector.TextSelectorConfig(type=selector.TextSelectorType.PASSWORD)
+        ),
     }
 )
 
@@ -35,14 +40,14 @@ class OctopusAnalyticsConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
         if user_input is not None:
             try:
-                async with aiohttp.ClientSession() as session:
-                    client = OctopusAnalyticsApiClient(
-                        user_input[CONF_EMAIL],
-                        user_input[CONF_PASSWORD],
-                        session,
-                    )
-                    await client.authenticate()
-                    account_number = await client.get_account_number()
+                session = async_get_clientsession(self.hass)
+                client = OctopusAnalyticsApiClient(
+                    user_input[CONF_EMAIL],
+                    user_input[CONF_PASSWORD],
+                    session,
+                )
+                await client.authenticate()
+                account_number = await client.get_account_number()
 
             except OctopusAnalyticsAuthError:
                 errors["base"] = "invalid_auth"

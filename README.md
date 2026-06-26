@@ -3,6 +3,8 @@
 Erweiterte Verbrauchsanalyse für Octopus Energy Germany Kunden.  
 Liefert YTD, monatliche KPIs, Stunden-Charts und Tagesvergleiche – direkt aus der Octopus API.
 
+> Hinweis: Dies ist eine Community-/Custom-Integration und keine offizielle Home-Assistant-Core-Integration.
+
 ## Features
 
 - **YTD Verbrauch & Kosten** – kumuliert seit Jahresbeginn
@@ -12,6 +14,12 @@ Liefert YTD, monatliche KPIs, Stunden-Charts und Tagesvergleiche – direkt aus 
 - **30-Tage-Chart** – Tagesverlauf der letzten 30 Tage
 - **Kontostand & Strompreis** – live aus der API
 - **Lovelace Card** – glassmorphism Design, passt zu HA Dashboards
+
+## Voraussetzungen
+
+- Home Assistant `2024.1.0` oder neuer
+- HACS für die Installation als Custom Repository
+- Octopus Energy Germany Account mit E-Mail und Passwort
 
 ## Installation via HACS
 
@@ -24,12 +32,28 @@ Liefert YTD, monatliche KPIs, Stunden-Charts und Tagesvergleiche – direkt aus 
 
 ### 2. Integration installieren
 
-1. HACS → Integrationen → Suche nach "Octopus Analytics"
-2. **Herunterladen** → Home Assistant neu starten
+1. HACS → Integrationen → Suche nach **Octopus Analytics**
+2. **Herunterladen**
+3. Home Assistant neu starten
 
-### 3. Lovelace Card registrieren
+### 3. Lovelace Card installieren
+
+Die Integration enthält zusätzlich eine Custom Lovelace Card. Diese muss aktuell manuell nach Home Assistant kopiert werden:
+
+```text
+www/octopus-analytics-card/octopus-analytics-card.js
+```
+
+nach:
+
+```text
+/config/www/octopus-analytics-card/octopus-analytics-card.js
+```
+
+Danach die Resource registrieren.
 
 In `configuration.yaml`:
+
 ```yaml
 lovelace:
   resources:
@@ -37,14 +61,18 @@ lovelace:
       type: module
 ```
 
-Oder unter **Einstellungen → Dashboards → Ressourcen** manuell hinzufügen.
+Oder unter **Einstellungen → Dashboards → Ressourcen** manuell hinzufügen:
 
-Dann die Dateien aus `www/octopus-analytics-card/` nach `/config/www/octopus-analytics-card/` kopieren.
+```text
+/local/octopus-analytics-card/octopus-analytics-card.js
+```
+
+Typ: `JavaScript-Modul`
 
 ### 4. Integration einrichten
 
 1. **Einstellungen → Geräte & Dienste → Integration hinzufügen**
-2. Suche nach "Octopus Analytics"
+2. Suche nach **Octopus Analytics**
 3. E-Mail und Passwort des Octopus Energy Germany Accounts eingeben
 
 ## Lovelace Card verwenden
@@ -78,6 +106,12 @@ show_monthly: true
 
 Die Daten werden alle **6 Stunden** aktualisiert. Da Octopus die Verbrauchsdaten mit einem Tag Verzug liefert, ist das ausreichend.
 
+## Support
+
+Fehler und Feature-Wünsche bitte über GitHub Issues melden:
+
+<https://github.com/fbubeck/octopus_analytics/issues>
+
 ## Lizenz
 
-MIT License
+MIT License – siehe [LICENSE](LICENSE).
