@@ -248,6 +248,13 @@ class OctopusAnalyticsCard extends HTMLElement {
     const avgCost = monthDays > 0 ? monthCost / monthDays : 0;
     const projectedKwh = avgKwh * daysInMonth;
     const projectedCost = avgCost * daysInMonth;
+    const unitRate = parseFloat(this._getState("sensor.octopus_analytics_strompreis"));
+    const standingCharge = parseFloat(this._getState("sensor.octopus_analytics_grundpreis_pro_tag"));
+    const projectedEnergyCost = !isNaN(unitRate) ? projectedKwh * unitRate : null;
+    const projectedStandingCost = !isNaN(standingCharge) ? standingCharge * daysInMonth : null;
+    const costBreakdown = projectedEnergyCost !== null && projectedStandingCost !== null
+      ? `AP ${this._formatEur(projectedEnergyCost)} + GP ${this._formatEur(projectedStandingCost)}`
+      : `Ist ${this._formatEur(monthCost)}`;
     const paymentSource = this._config.monthly_payment_eur ?? this._config.monthly_budget_eur;
     const payment = parseFloat(paymentSource);
     const paymentDelta = !isNaN(payment) ? payment - projectedCost : null;
@@ -257,7 +264,7 @@ class OctopusAnalyticsCard extends HTMLElement {
         <div class="forecast-card accent-blue">
           <div class="kpi-label">MONATSENDE PROG.</div>
           <div class="kpi-value">${this._formatEur(projectedCost)}</div>
-          <div class="kpi-sub">Ist ${this._formatEur(monthCost)} · Prog. ${this._formatKwh(projectedKwh)}</div>
+          <div class="kpi-sub">${costBreakdown} · ${this._formatKwh(projectedKwh)}</div>
         </div>
         <div class="forecast-card ${paymentDelta === null ? "" : paymentDelta >= 0 ? "accent-teal" : "accent-red"}">
           <div class="kpi-label">ABSCHLAG PLAN</div>
@@ -265,7 +272,7 @@ class OctopusAnalyticsCard extends HTMLElement {
           <div class="kpi-sub">Prog. ${this._formatEur(projectedCost)} · Δ ${paymentDelta === null ? "—" : (paymentDelta >= 0 ? "+" : "−") + this._formatEur(Math.abs(paymentDelta))}</div>
         </div>
       </div>
-      <div class="mini-note">Ist = bisher im Monat · Prog. = Hochrechnung bis Monatsende · Δ = Abschlag minus Prognose</div>`;
+      <div class="mini-note">AP = Arbeitspreis · GP = Grundpreis · Δ = Abschlag minus Prognose</div>`;
   }
 
   _renderTrafficAndAnomalies(last30) {

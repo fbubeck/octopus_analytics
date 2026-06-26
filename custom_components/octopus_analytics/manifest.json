@@ -1,7 +1,7 @@
 {
   "domain": "octopus_analytics",
   "name": "Octopus Analytics",
-  "version": "1.0.22",
+  "version": "1.0.23",
   "documentation": "https://github.com/fbubeck/octopus_analytics",
   "issue_tracker": "https://github.com/fbubeck/octopus_analytics/issues",
   "dependencies": [],
