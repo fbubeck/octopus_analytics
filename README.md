@@ -38,36 +38,26 @@ Liefert YTD, monatliche KPIs, Stunden-Charts und Tagesvergleiche – direkt aus 
 
 ### 3. Lovelace Card installieren
 
-Die Integration enthält zusätzlich eine Custom Lovelace Card. Diese muss aktuell manuell nach Home Assistant kopiert werden:
+Die Integration liefert die Custom Lovelace Card ab `v1.0.14` automatisch als statische Datei aus. Du musst keine Datei mehr nach `/config/www` kopieren.
+
+Resource registrieren unter **Einstellungen → Dashboards → Ressourcen**:
 
 ```text
-www/octopus-analytics-card/octopus-analytics-card.js
+/octopus_analytics_static/octopus-analytics-card.js
 ```
 
-nach:
+Typ: `JavaScript-Modul`
 
-```text
-/config/www/octopus-analytics-card/octopus-analytics-card.js
-```
-
-Danach die Resource registrieren.
-
-In `configuration.yaml`:
+Alternativ in `configuration.yaml`:
 
 ```yaml
 lovelace:
   resources:
-    - url: /local/octopus-analytics-card/octopus-analytics-card.js
+    - url: /octopus_analytics_static/octopus-analytics-card.js
       type: module
 ```
 
-Oder unter **Einstellungen → Dashboards → Ressourcen** manuell hinzufügen:
-
-```text
-/local/octopus-analytics-card/octopus-analytics-card.js
-```
-
-Typ: `JavaScript-Modul`
+Danach Home Assistant bzw. das Dashboard neu laden.
 
 ### 4. Integration einrichten
 

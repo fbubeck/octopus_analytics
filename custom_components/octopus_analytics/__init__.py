@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 
 import aiohttp
 from homeassistant.config_entries import ConfigEntry
@@ -9,16 +10,37 @@ from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
+try:
+    from homeassistant.components.http import StaticPathConfig, async_register_static_paths
+except ImportError:  # pragma: no cover - compatibility fallback
+    StaticPathConfig = None
+    async_register_static_paths = None
+
 from .api import OctopusAnalyticsApiClient
 from .const import CONF_EMAIL, CONF_PASSWORD, DOMAIN
 from .coordinator import OctopusAnalyticsCoordinator
 
 _LOGGER = logging.getLogger(__name__)
 PLATFORMS = [Platform.SENSOR]
+STATIC_URL_PATH = f"/{DOMAIN}_static"
+STATIC_DIR = Path(__file__).parent / "www"
+
+
+async def _async_register_frontend(hass: HomeAssistant) -> None:
+    """Expose the bundled Lovelace card as a static asset."""
+    if async_register_static_paths and StaticPathConfig:
+        await async_register_static_paths(
+            hass,
+            [StaticPathConfig(STATIC_URL_PATH, str(STATIC_DIR), True)],
+        )
+    else:
+        hass.http.register_static_path(STATIC_URL_PATH, str(STATIC_DIR), True)
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up Octopus Analytics from a config entry."""
+    await _async_register_frontend(hass)
+
     session = async_get_clientsession(hass)
     client = OctopusAnalyticsApiClient(
         entry.data[CONF_EMAIL],
