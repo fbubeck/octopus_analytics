@@ -1,0 +1,22 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
+
+# Home Assistant / local config
+.storage/
+secrets.yaml
+*.log
+
+# macOS / editor
+.DS_Store
+.idea/
+.vscode/
+
+# Pi agent local state
+.pi/

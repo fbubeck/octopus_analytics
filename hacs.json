@@ -1,0 +1,9 @@
+{
+  "name": "Octopus Analytics",
+  "description": "Erweiterte Verbrauchsanalyse für Octopus Energy Germany – YTD, monatliche KPIs, Stunden-Chart",
+  "render_readme": true,
+  "domains": ["sensor"],
+  "documentation": "https://github.com/fbubeck/octopus_analytics",
+  "issue_tracker": "https://github.com/fbubeck/octopus_analytics/issues",
+  "homeassistant": "2024.1.0"
+}
