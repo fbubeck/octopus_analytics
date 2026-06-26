@@ -169,9 +169,10 @@ class OctopusAnalyticsCard extends HTMLElement {
         <span class="chart-total">${period} · max ${maxVal.toFixed(2)} kWh</span>
       </div>
       <div class="chart-nav">
-        <button class="chart-nav-btn" data-action="daily-prev" ${this._dailyPage >= maxPage ? "disabled" : ""}>‹ Zurück</button>
-        <button class="chart-nav-btn" data-action="daily-next" ${this._dailyPage <= 0 ? "disabled" : ""}>Vor ›</button>
+        <button class="chart-nav-btn" data-action="daily-prev" ${this._dailyPage >= maxPage ? "disabled" : ""} title="Ältere Tage anzeigen">‹ Zurück</button>
+        <button class="chart-nav-btn" data-action="daily-next" ${this._dailyPage <= 0 ? "disabled" : ""} title="Neuere Tage anzeigen">Vor ›</button>
       </div>
+      ${maxPage === 0 ? `<div class="mini-note">Keine älteren Tagesdaten im Card-Cache. Nach Update Integration neu laden, damit Tageshistorie verfügbar ist.</div>` : ""}
       <div class="chart-body">
         <div class="chart-area" style="margin-left:0">
           <div class="bars">${bars}</div>
@@ -223,9 +224,10 @@ class OctopusAnalyticsCard extends HTMLElement {
         <span class="chart-total">∑ ${total.toFixed(1)} kWh</span>
       </div>
       <div class="chart-nav">
-        <button class="chart-nav-btn" data-action="month-prev" ${year <= minYear ? "disabled" : ""}>‹ Vorjahr</button>
-        <button class="chart-nav-btn" data-action="month-next" ${year >= maxYear ? "disabled" : ""}>Folgejahr ›</button>
+        <button class="chart-nav-btn" data-action="month-prev" ${year <= minYear ? "disabled" : ""} title="Vorheriges Jahr anzeigen">‹ Vorjahr</button>
+        <button class="chart-nav-btn" data-action="month-next" ${year >= maxYear ? "disabled" : ""} title="Nächstes Jahr anzeigen">Folgejahr ›</button>
       </div>
+      ${minYear === maxYear ? `<div class="mini-note">Monatsnavigation aktiv, sobald Daten aus mehreren Jahren vorhanden sind.</div>` : ""}
       <div class="chart-body">
         <div class="chart-area" style="margin-left:0">
           <div class="bars month-bars">${bars}</div>
@@ -962,7 +964,20 @@ class OctopusAnalyticsCard extends HTMLElement {
 
     const hourlyData = this._getAttr("sensor.octopus_analytics_verbrauch_gestern", "hourly") || [];
     const last30 = this._getAttr("sensor.octopus_analytics_letzte_30_tage_json", "data") || [];
-    const dailyHistory = this._getAttr("sensor.octopus_analytics_tageshistorie_json", "data") || last30;
+    let dailyHistory = this._getAttr("sensor.octopus_analytics_tageshistorie_json", "data") || [];
+
+    // Be tolerant if Home Assistant generated a slightly different entity_id
+    // or the new history entity was added after an update. Use the longest
+    // Octopus data attribute that looks like daily [{date,kwh}, ...] history.
+    if (!Array.isArray(dailyHistory) || dailyHistory.length <= last30.length) {
+      const candidates = Object.values(this._hass.states || {})
+        .filter((state) => state.entity_id?.startsWith("sensor.octopus_analytics"))
+        .map((state) => state.attributes?.data)
+        .filter((data) => Array.isArray(data) && data[0]?.date && data[0]?.kwh !== undefined)
+        .sort((a, b) => b.length - a.length);
+      dailyHistory = candidates[0] || last30;
+    }
+
     const monthly = this._getAttr("sensor.octopus_analytics_monatszusammenfassung_json", "data") || {};
 
     this.shadowRoot.innerHTML = `
