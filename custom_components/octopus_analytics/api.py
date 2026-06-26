@@ -89,9 +89,9 @@ class OctopusAnalyticsApiClient:
     async def get_meter_info(self) -> dict:
         """Get electricity meter and product info.
 
-        Avoid account.property here because some Octopus Germany accounts return
-        an internal Kraken error for that field. The market supply agreement path
-        is enough for stable device/product metadata.
+        Avoid account.property and supplyPoint.devices here because some Octopus
+        Germany accounts return an internal Kraken error for those fields. The
+        market supply agreement path is enough for stable product metadata.
         """
         query = """
         query AccountDetails($accountNumber: String!) {
@@ -106,13 +106,6 @@ class OctopusAnalyticsApiClient:
                             supplyPoint {
                                 marketName
                                 externalIdentifier
-                                devices(first: 5) {
-                                    edges {
-                                        node {
-                                            deviceIdentifier
-                                        }
-                                    }
-                                }
                             }
                         }
                     }
@@ -135,15 +128,10 @@ class OctopusAnalyticsApiClient:
             (agreements[0].get("node") or {}) if agreements else {},
         )
         supply_point = electricity_agreement.get("supplyPoint") or {}
-        devices = (supply_point.get("devices") or {}).get("edges", [])
         product = electricity_agreement.get("product") or {}
 
         return {
-            "serial_number": (
-                (devices[0].get("node") or {}).get("deviceIdentifier")
-                if devices
-                else None
-            ),
+            "serial_number": None,
             "melo_number": None,
             "mpan": supply_point.get("externalIdentifier"),
             "unit_rate": None,
