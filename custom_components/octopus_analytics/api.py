@@ -87,27 +87,24 @@ class OctopusAnalyticsApiClient:
         return self._account_number
 
     async def get_meter_info(self) -> dict:
-        """Get electricity meter and product info.
-
-        Avoid account.property and supplyPoint.devices here because some Octopus
-        Germany accounts return an internal Kraken error for those fields. The
-        market supply agreement path is enough for stable product metadata.
-        """
+        """Get electricity meter and tariff info."""
         query = """
         query AccountDetails($accountNumber: String!) {
             account(accountNumber: $accountNumber) {
-                marketSupplyAgreements(active: true, first: 10) {
-                    edges {
-                        node {
-                            isActive
-                            product {
-                                code
-                            }
-                            supplyPoint {
-                                marketName
-                                externalIdentifier
-                            }
+                electricityAgreements {
+                    meterPoint {
+                        meters {
+                            serialNumber
                         }
+                        mpan
+                        maloNumber
+                        meloNumber
+                    }
+                    tariff {
+                        unitRate
+                        productCode
+                        validFrom
+                        validTo
                     }
                 }
             }
@@ -115,28 +112,19 @@ class OctopusAnalyticsApiClient:
         """
         data = await self._graphql(query, {"accountNumber": self._account_number})
         account = data.get("account") or {}
-        agreements = (account.get("marketSupplyAgreements") or {}).get("edges", [])
-        electricity_agreement = next(
-            (
-                edge.get("node") or {}
-                for edge in agreements
-                if (edge.get("node") or {})
-                .get("supplyPoint", {})
-                .get("marketName")
-                == "DEU_ELECTRICITY"
-            ),
-            (agreements[0].get("node") or {}) if agreements else {},
-        )
-        supply_point = electricity_agreement.get("supplyPoint") or {}
-        product = electricity_agreement.get("product") or {}
+        agreements = account.get("electricityAgreements") or []
+        agreement = agreements[0] if agreements else {}
+        meter_point = agreement.get("meterPoint") or {}
+        meters = meter_point.get("meters") or []
+        tariff = agreement.get("tariff") or {}
 
         return {
-            "serial_number": None,
-            "melo_number": None,
-            "mpan": supply_point.get("externalIdentifier"),
-            "unit_rate": None,
+            "serial_number": meters[0].get("serialNumber") if meters else None,
+            "melo_number": meter_point.get("meloNumber"),
+            "mpan": meter_point.get("mpan") or meter_point.get("maloNumber"),
+            "unit_rate": tariff.get("unitRate"),
             "standing_charge": None,
-            "product_code": product.get("code"),
+            "product_code": tariff.get("productCode"),
         }
 
     async def get_consumption(
@@ -146,52 +134,16 @@ class OctopusAnalyticsApiClient:
         frequency: str = "THIRTY_MIN_INTERVAL",
     ) -> list[dict]:
         """Get electricity consumption data between two dates."""
-        granularity = {
-            "DAY_INTERVAL": "DAY",
-            "THIRTY_MIN_INTERVAL": "THIRTY_MIN",
-            "HOUR_INTERVAL": "HOUR",
-        }.get(frequency, "THIRTY_MIN")
-        start_at = datetime.combine(start, time.min).isoformat()
-        end_at = datetime.combine(end + timedelta(days=1), time.min).isoformat()
-
         query = """
-        query ConsumptionData(
-            $accountNumber: String!
-            $startAt: DateTime!
-            $endAt: DateTime!
-            $granularity: TimeGranularities!
-            $after: String
-        ) {
+        query ConsumptionData($accountNumber: String!, $startAt: DateTime!) {
             account(accountNumber: $accountNumber) {
-                marketSupplyAgreements(first: 10) {
-                    edges {
-                        node {
-                            supplyPoint {
-                                marketName
-                                readings(
-                                    startAt: $startAt
-                                    endAt: $endAt
-                                    readingType: INTERVAL
-                                    timeGranularity: $granularity
-                                    timezone: "Europe/Berlin"
-                                    units: [KILOWATT_HOURS]
-                                ) {
-                                    importReadings(first: 100, after: $after) {
-                                        pageInfo {
-                                            hasNextPage
-                                            endCursor
-                                        }
-                                        edges {
-                                            node {
-                                                value
-                                                units
-                                                intervalStart
-                                                intervalEnd
-                                            }
-                                        }
-                                    }
-                                }
-                            }
+                electricityAgreements {
+                    meterPoint {
+                        halfHourlyReadings(startAt: $startAt, first: 48) {
+                            startAt
+                            endAt
+                            value
+                            unit
                         }
                     }
                 }
@@ -200,56 +152,34 @@ class OctopusAnalyticsApiClient:
         """
 
         results = []
-        after: str | None = None
-        for _ in range(50):
+        current = start
+        while current <= end:
+            start_at = datetime.combine(current, time.min).isoformat()
             data = await self._graphql(
                 query,
                 {
                     "accountNumber": self._account_number,
                     "startAt": start_at,
-                    "endAt": end_at,
-                    "granularity": granularity,
-                    "after": after,
                 },
             )
             account = data.get("account") or {}
-            agreement_edges = (account.get("marketSupplyAgreements") or {}).get(
-                "edges", []
-            )
-            next_after = None
-            has_next_page = False
-            found_electricity = False
-
-            for agreement_edge in agreement_edges:
-                node = agreement_edge.get("node") or {}
-                supply_point = node.get("supplyPoint") or {}
-                if supply_point.get("marketName") != "DEU_ELECTRICITY":
-                    continue
-
-                found_electricity = True
-                readings = supply_point.get("readings") or {}
-                import_readings = readings.get("importReadings") or {}
-                page_info = import_readings.get("pageInfo") or {}
-                has_next_page = bool(page_info.get("hasNextPage"))
-                next_after = page_info.get("endCursor")
-
-                for reading_edge in import_readings.get("edges", []):
-                    reading = reading_edge.get("node") or {}
-                    start_dt = reading.get("intervalStart")
+            agreements = account.get("electricityAgreements") or []
+            for agreement in agreements:
+                meter_point = agreement.get("meterPoint") or {}
+                readings = meter_point.get("halfHourlyReadings") or []
+                for reading in readings:
+                    start_dt = reading.get("startAt")
                     if not start_dt:
                         continue
                     results.append(
                         {
                             "startDt": start_dt,
-                            "endDt": reading.get("intervalEnd") or start_dt,
+                            "endDt": reading.get("endAt") or start_dt,
                             "value": reading.get("value"),
-                            "unit": reading.get("units"),
+                            "unit": reading.get("unit"),
                         }
                     )
-
-            if not found_electricity or not has_next_page or not next_after:
-                break
-            after = next_after
+            current += timedelta(days=1)
 
         return results
 
