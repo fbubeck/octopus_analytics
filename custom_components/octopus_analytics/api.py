@@ -10,6 +10,7 @@ import aiohttp
 _LOGGER = logging.getLogger(__name__)
 
 API_URL = "https://api.octopus.energy/v1/graphql/"
+AUTH_API_URL = "https://api.oeg-kraken.energy/v1/graphql/"
 
 
 class OctopusAnalyticsApiError(Exception):
@@ -30,7 +31,13 @@ class OctopusAnalyticsApiClient:
         self._token: str | None = None
         self._account_number: str | None = None
 
-    async def _graphql(self, query: str, variables: dict | None = None, auth: bool = True) -> dict:
+    async def _graphql(
+        self,
+        query: str,
+        variables: dict | None = None,
+        auth: bool = True,
+        url: str = API_URL,
+    ) -> dict:
         """Execute a GraphQL query."""
         headers = {"Content-Type": "application/json"}
         if auth and self._token:
@@ -40,12 +47,20 @@ class OctopusAnalyticsApiClient:
         if variables:
             payload["variables"] = variables
 
-        async with self._session.post(API_URL, json=payload, headers=headers) as resp:
+        async with self._session.post(url, json=payload, headers=headers) as resp:
             if resp.status == 401:
                 raise OctopusAnalyticsAuthError("Authentication failed")
             data = await resp.json()
             if "errors" in data:
-                raise OctopusAnalyticsApiError(f"GraphQL error: {data['errors']}")
+                errors = data["errors"]
+                if any(
+                    (err.get("extensions") or {}).get("errorType") == "AUTHORIZATION"
+                    or (err.get("extensions") or {}).get("errorCode")
+                    in ("KT-CT-1112", "KT-CT-1161")
+                    for err in errors
+                ):
+                    raise OctopusAnalyticsAuthError(f"GraphQL auth error: {errors}")
+                raise OctopusAnalyticsApiError(f"GraphQL error: {errors}")
             return data.get("data", {})
 
     async def authenticate(self) -> str:
@@ -61,6 +76,7 @@ class OctopusAnalyticsApiClient:
             query,
             {"input": {"email": self._email, "password": self._password}},
             auth=False,
+            url=AUTH_API_URL,
         )
         token = data.get("obtainKrakenToken", {}).get("token")
         if not token:
@@ -79,7 +95,7 @@ class OctopusAnalyticsApiClient:
             }
         }
         """
-        data = await self._graphql(query)
+        data = await self._graphql(query, url=AUTH_API_URL)
         accounts = data.get("viewer", {}).get("accounts", [])
         if not accounts:
             raise OctopusAnalyticsApiError("No accounts found")
