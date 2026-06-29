@@ -8,6 +8,7 @@ from typing import Any
 import aiohttp
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
+from homeassistant.util import dt as dt_util
 
 from .analytics import (
     aggregate_to_daily,
@@ -177,6 +178,7 @@ class OctopusAnalyticsCoordinator(DataUpdateCoordinator):
                 "standing_charge": standing_charge_eur,
                 "meter_info": self._meter_info,
                 "updated": date.today().isoformat(),
+                "updated_at": dt_util.now(),
             }
 
         except OctopusAnalyticsAuthError as err:

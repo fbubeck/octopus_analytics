@@ -26,6 +26,7 @@ _LOGGER = logging.getLogger(__name__)
 PLATFORMS = [Platform.SENSOR]
 STATIC_URL_PATH = f"/{DOMAIN}_static"
 STATIC_DIR = Path(__file__).parent / "www"
+SERVICE_REFRESH = "refresh"
 
 
 async def _async_register_frontend(hass: HomeAssistant) -> None:
@@ -42,9 +43,26 @@ async def _async_register_frontend(hass: HomeAssistant) -> None:
         )
 
 
+async def _async_register_services(hass: HomeAssistant) -> None:
+    """Register integration services once."""
+    services_key = f"{DOMAIN}_services_registered"
+    if hass.data.get(services_key):
+        return
+
+    async def async_refresh_service(call) -> None:
+        """Refresh all Octopus Analytics coordinators on demand."""
+        coordinators = hass.data.get(DOMAIN, {}).values()
+        for coordinator in coordinators:
+            await coordinator.async_request_refresh()
+
+    hass.services.async_register(DOMAIN, SERVICE_REFRESH, async_refresh_service)
+    hass.data[services_key] = True
+
+
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up Octopus Analytics from a config entry."""
     await _async_register_frontend(hass)
+    await _async_register_services(hass)
 
     session = async_get_clientsession(hass)
     client = OctopusAnalyticsApiClient(

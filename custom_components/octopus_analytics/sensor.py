@@ -192,6 +192,13 @@ SENSOR_DESCRIPTIONS: list[OctopusSensorEntityDescription] = [
         value_fn=lambda d: d["standing_charge"],
     ),
     OctopusSensorEntityDescription(
+        key="last_update",
+        name="Letztes Update",
+        icon="mdi:update",
+        device_class=SensorDeviceClass.TIMESTAMP,
+        value_fn=lambda d: d.get("updated_at"),
+    ),
+    OctopusSensorEntityDescription(
         key="last_30_days",
         name="Letzte 30 Tage JSON",
         icon="mdi:chart-bar",

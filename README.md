@@ -96,6 +96,7 @@ anomaly_threshold_percent: 30 # optional: Schwelle für Anomalien
 | `sensor.octopus_analytics_kontostand` | Kontostand € |
 | `sensor.octopus_analytics_strompreis` | Aktueller Strompreis €/kWh |
 | `sensor.octopus_analytics_grundpreis_pro_tag` | Grundpreis €/Tag |
+| `sensor.octopus_analytics_letztes_update` | Zeitpunkt der letzten erfolgreichen Aktualisierung |
 | `sensor.octopus_analytics_letzte_30_tage_json` | 30-Tage Daten als JSON-Attribut |
 | `sensor.octopus_analytics_tageshistorie_json` | Tageshistorie bis 365 Tage als JSON-Attribut |
 | `sensor.octopus_analytics_monatszusammenfassung_json` | Alle Monate als JSON-Attribut |
@@ -103,6 +104,14 @@ anomaly_threshold_percent: 30 # optional: Schwelle für Anomalien
 ## Update-Intervall
 
 Die Daten werden alle **6 Stunden** aktualisiert. Da Octopus die Verbrauchsdaten mit einem Tag Verzug liefert, ist das ausreichend.
+
+Manuelles Update per Service:
+
+```yaml
+service: octopus_analytics.refresh
+```
+
+Der Sensor `sensor.octopus_analytics_letztes_update` zeigt den Zeitpunkt der letzten erfolgreichen Aktualisierung.
 
 ## Support
 
