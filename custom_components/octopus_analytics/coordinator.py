@@ -7,6 +7,7 @@ from typing import Any
 
 import aiohttp
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers.storage import Store
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 from homeassistant.util import dt as dt_util
 
@@ -42,10 +43,19 @@ class OctopusAnalyticsCoordinator(DataUpdateCoordinator):
         self._hourly_yesterday: list[dict] = []
         self._hourly_history: list[dict] = []
         self._meter_info: dict = {}
+        self._store: Store = Store(hass, 1, f"{DOMAIN}_cache")
+        self._last_data: dict[str, Any] | None = None
+
+    async def _async_load_cache(self) -> dict[str, Any] | None:
+        """Load the last successful data snapshot from disk."""
+        if self._last_data is None:
+            self._last_data = await self._store.async_load()
+        return self._last_data
 
     async def _async_update_data(self) -> dict[str, Any]:
         """Fetch and aggregate all data."""
         try:
+            cached_data = await self._async_load_cache()
             await self.client.ensure_authenticated()
 
             today = date.today()
@@ -58,11 +68,20 @@ class OctopusAnalyticsCoordinator(DataUpdateCoordinator):
                 history_start, yesterday, "DAY_INTERVAL"
             )
 
-            if not raw and self._daily_cache:
-                _LOGGER.warning("No consumption data returned, using cached data")
-                daily = self._daily_cache
+            if not raw:
+                if self._daily_cache:
+                    _LOGGER.warning("No consumption data returned, using in-memory cache")
+                    daily = self._daily_cache
+                elif cached_data:
+                    _LOGGER.warning("No consumption data returned, using stored cache")
+                    return cached_data
+                else:
+                    raise UpdateFailed("No consumption data returned and no cache available")
             else:
                 daily = aggregate_to_daily(raw)
+                if not daily and cached_data:
+                    _LOGGER.warning("Consumption data was empty after aggregation, using stored cache")
+                    return cached_data
                 self._daily_cache = daily
 
             # Hourly data for yesterday and recent history for day navigation.
@@ -70,12 +89,16 @@ class OctopusAnalyticsCoordinator(DataUpdateCoordinator):
                 yesterday, yesterday, "THIRTY_MIN_INTERVAL"
             )
             self._hourly_yesterday = aggregate_to_hourly(hourly_raw)
+            if not self._hourly_yesterday and cached_data:
+                self._hourly_yesterday = cached_data.get("hourly_yesterday", [])
 
             hourly_history_start = today - timedelta(days=30)
             hourly_history_raw = await self.client.get_consumption(
                 hourly_history_start, yesterday, "THIRTY_MIN_INTERVAL"
             )
             self._hourly_history = aggregate_to_hourly(hourly_history_raw)
+            if not self._hourly_history and cached_data:
+                self._hourly_history = cached_data.get("hourly_history", [])
 
             # Aggregations
             monthly = aggregate_to_monthly(daily)
@@ -83,8 +106,21 @@ class OctopusAnalyticsCoordinator(DataUpdateCoordinator):
             daily_history = get_last_n_days(daily, 365)
             last_30 = get_last_n_days(daily, 30)
 
-            # Current month data
-            current_month_key = today.strftime("%Y-%m")
+            # Use the newest day actually returned by Octopus. In the morning,
+            # Octopus may not have published yesterday yet; keep showing the
+            # latest complete day/month instead of replacing values with zero.
+            latest_day = daily[-1] if daily else None
+            latest_date = latest_day["date"] if latest_day else yesterday.isoformat()
+
+            if self._hourly_history and not any(
+                h.get("start", "").startswith(latest_date) for h in self._hourly_yesterday
+            ):
+                self._hourly_yesterday = [
+                    h for h in self._hourly_history if h.get("start", "").startswith(latest_date)
+                ]
+
+            # Current displayed month data (latest available month)
+            current_month_key = latest_date[:7]
             current_month = monthly.get(current_month_key, {
                 "total_kwh": 0.0,
                 "avg_day_kwh": 0.0,
@@ -95,17 +131,14 @@ class OctopusAnalyticsCoordinator(DataUpdateCoordinator):
                 "low_date": None,
             })
 
-            # Previous month
-            first_of_month = today.replace(day=1)
-            prev_month_date = first_of_month - timedelta(days=1)
+            # Previous month relative to the displayed/latest month
+            latest_month_date = date.fromisoformat(f"{current_month_key}-01")
+            prev_month_date = latest_month_date - timedelta(days=1)
             prev_month_key = prev_month_date.strftime("%Y-%m")
             prev_month = monthly.get(prev_month_key, {})
 
-            # Yesterday
-            yesterday_str = yesterday.isoformat()
-            yesterday_data = next(
-                (d for d in daily if d["date"] == yesterday_str), None
-            )
+            # Latest available day (normally yesterday, but can lag behind)
+            yesterday_data = latest_day
 
             # Balance
             balance = await self.client.get_account_balance()
@@ -145,7 +178,7 @@ class OctopusAnalyticsCoordinator(DataUpdateCoordinator):
                 standing_charge_eur if yesterday_data else 0.0, 2
             )
 
-            return {
+            result = {
                 "ytd": ytd,
                 "ytd_energy_cost": ytd_energy_cost,
                 "ytd_standing_cost": ytd_standing_cost,
@@ -178,8 +211,12 @@ class OctopusAnalyticsCoordinator(DataUpdateCoordinator):
                 "standing_charge": standing_charge_eur,
                 "meter_info": self._meter_info,
                 "updated": date.today().isoformat(),
-                "updated_at": dt_util.now(),
+                "updated_at": dt_util.now().isoformat(),
+                "latest_data_date": latest_date,
             }
+            self._last_data = result
+            await self._store.async_save(result)
+            return result
 
         except OctopusAnalyticsAuthError as err:
             raise UpdateFailed(f"Authentication error: {err}") from err
