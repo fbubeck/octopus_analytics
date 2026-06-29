@@ -11,6 +11,7 @@ class OctopusAnalyticsCard extends HTMLElement {
     this._dailyMonthOffset = 0;
     this._hourlyDayOffset = 0;
     this._monthYearOffset = 0;
+    this._refreshing = false;
   }
 
   setConfig(config) {
@@ -587,14 +588,36 @@ class OctopusAnalyticsCard extends HTMLElement {
         font-family: sans-serif;
         border: none;
       }
+      .card-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 10px;
+        margin-bottom: 14px;
+      }
       .card-title {
         font-size: 13px;
         font-weight: 700;
         color: rgba(255,255,255,0.5);
         text-transform: uppercase;
         letter-spacing: 0.6px;
-        margin-bottom: 14px;
       }
+      .refresh-btn {
+        width: 30px;
+        height: 30px;
+        border: 1px solid rgba(80,200,255,0.28);
+        border-radius: 999px;
+        background: rgba(80,200,255,0.10);
+        color: rgba(160,230,255,0.95);
+        font-size: 17px;
+        font-weight: 900;
+        line-height: 1;
+        cursor: pointer;
+        transition: transform 0.15s, background 0.15s, opacity 0.15s;
+      }
+      .refresh-btn:hover { background: rgba(80,200,255,0.18); transform: rotate(25deg); }
+      .refresh-btn:disabled { opacity: 0.55; cursor: wait; animation: spin 0.9s linear infinite; }
+      @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
       .tabs {
         display: grid;
         grid-template-columns: repeat(4, 1fr);
@@ -1019,10 +1042,27 @@ class OctopusAnalyticsCard extends HTMLElement {
     this.shadowRoot.innerHTML = `
       <style>${this._styles()}</style>
       <ha-card>
-        <div class="card-title">${this._config.title}</div>
+        <div class="card-header">
+          <div class="card-title">${this._config.title}</div>
+          <button class="refresh-btn" title="Daten aktualisieren" ${this._refreshing ? "disabled" : ""}>
+            ${this._refreshing ? "⟳" : "↻"}
+          </button>
+        </div>
         ${this._renderTabs()}
         ${this._renderActiveTab(hourlyData, last30, monthly, dailyHistory)}
       </ha-card>`;
+
+    this.shadowRoot.querySelector(".refresh-btn")?.addEventListener("click", async () => {
+      if (this._refreshing) return;
+      this._refreshing = true;
+      this._render();
+      try {
+        await this._hass.callService("octopus_analytics", "refresh");
+      } finally {
+        this._refreshing = false;
+        this._render();
+      }
+    });
 
     this.shadowRoot.querySelectorAll(".tab").forEach((button) => {
       button.addEventListener("click", () => {
